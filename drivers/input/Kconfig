@@ -1,0 +1,27 @@
+# Copyright (c) 2022 The ZMK Contributors
+# SPDX-License-Identifier: MIT
+
+DT_COMPAT_ZMK_INPUT_PROCESSOR_ABSOLUTE_TO_RELATIVE := zmk,input-processor-absolute-to-relative
+
+config ZMK_INPUT_PROCESSOR_ABSOLUTE_TO_RELATIVE
+		bool
+		default $(dt_compat_enabled,$(DT_COMPAT_ZMK_INPUT_PROCESSOR_ABSOLUTE_TO_RELATIVE))
+		depends on ZMK_POINTING
+        depends on (!ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL)
+
+config ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS
+	bool "Publish the suppression flags through zmk-feature-custom-settings"
+	# Not ZMK_CUSTOM_SETTINGS: registering a subsystem needs zmk/studio/custom.h,
+	# which includes ZMK's nanopb-generated proto/zmk/custom.pb.h. That is only
+	# generated when the Studio RPC is being built, so the base registry alone
+	# would let this be selected and then fail on a missing header.
+	depends on ZMK_CUSTOM_SETTINGS_STUDIO_RPC
+	help
+	  Registers this converter's two suppression flags in the cross-module
+	  custom settings registry, so a Studio client lists and edits them with no
+	  page of its own. The registry then owns persistence and the driver stores
+	  nothing, so there is one owner for each value. Needs
+	  zmk-feature-custom-settings, and so the patched ZMK that carries the
+	  custom Studio RPC protocol; with this off, which is the default and what
+	  an upstream ZMK build gets, none of it is compiled and the devicetree
+	  values are fixed.

@@ -1,0 +1,16 @@
+name: Build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  note:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: No host tests
+        run: |
+          echo "This processor's logic is devicetree- and event-driven with no"
+          echo "pure arithmetic to pin on the host; it is exercised by building"
+          echo "a keyboard that uses it."
