@@ -66,7 +66,8 @@ static struct zmk_rpc_custom_subsystem_meta abs2rel_meta = {
  * register the literal text "ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN". One
  * more layer of call expands it first.
  */
-#define REGISTER_SUBSYSTEM(identifier, meta, handler)                                                  ZMK_RPC_CUSTOM_SUBSYSTEM(identifier, meta, handler)
+#define REGISTER_SUBSYSTEM(identifier, meta, handler)                                              \
+    ZMK_RPC_CUSTOM_SUBSYSTEM(identifier, meta, handler)
 
 REGISTER_SUBSYSTEM(ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN, &abs2rel_meta, abs2rel_namespace_handler);
 
