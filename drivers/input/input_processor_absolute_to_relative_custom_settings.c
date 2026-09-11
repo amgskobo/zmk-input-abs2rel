@@ -17,16 +17,66 @@
 
 #define DT_DRV_COMPAT zmk_input_processor_absolute_to_relative
 
+#include <string.h>
+
 #include <zephyr/devicetree.h>
+#include <zephyr/init.h>
 #include <zephyr/logging/log.h>
 
 #include <cormoran/zmk/custom_settings.h>
 #include <zmk/event_manager.h>
+#include <zmk/studio/custom.h>
 
 #include <zmk-input-abs2rel/absolute_to_relative.h>
 #include <zmk-input-abs2rel/custom_settings.h>
 
 LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+
+/*
+ * Registers the namespace these parameters are published under.
+ *
+ * custom-settings resolves a setting's subsystem identifier to an index before
+ * it can put the setting on the wire, and a setting whose subsystem was never
+ * registered is dropped with -ENOENT however correctly it was defined.
+ * Registration and definition are complementary, not alternatives.
+ *
+ * It lives in this file rather than one of its own because this module has a
+ * single processor. A module with several -- zmk-input-processors -- collects
+ * the registration and the check below into one module-level file instead, so
+ * that they are written once rather than per processor.
+ *
+ * The subsystem answers no calls of its own: the values are read and written
+ * through custom-settings' own RPC, which is what lets this processor appear
+ * in a client that has no page for it. The advertised URL is this module's own
+ * documentation, which is the only thing that explains what these settings do.
+ */
+static bool abs2rel_namespace_handler(const zmk_custom_CallRequest *request,
+                                      pb_callback_t *encode_response);
+
+static struct zmk_rpc_custom_subsystem_meta abs2rel_meta = {
+    ZMK_RPC_CUSTOM_SUBSYSTEM_UI_URLS("https://github.com/amgskobo/zmk-input-abs2rel"),
+    .security = ZMK_STUDIO_RPC_HANDLER_UNSECURED,
+};
+
+/*
+ * Through a wrapper so the token expands before it is stringified.
+ *
+ * ZMK_RPC_CUSTOM_SUBSYSTEM registers `#_identifier`, and `#` suppresses
+ * expansion of its own argument, so passing the macro straight in would
+ * register the literal text "ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN". One
+ * more layer of call expands it first.
+ */
+#define REGISTER_SUBSYSTEM(identifier, meta, handler)                                                  ZMK_RPC_CUSTOM_SUBSYSTEM(identifier, meta, handler)
+
+REGISTER_SUBSYSTEM(ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN, &abs2rel_meta, abs2rel_namespace_handler);
+
+static bool abs2rel_namespace_handler(const zmk_custom_CallRequest *request,
+                                      pb_callback_t *encode_response) {
+    ARG_UNUSED(request);
+    ARG_UNUSED(encode_response);
+
+    return false;
+}
 
 #define ABSOLUTE_TO_RELATIVE_SETTING(n, field, key)                                                \
     ZMK_CUSTOM_SETTING_DEFINE_WITH_CONSTRAINTS(                                                    \
@@ -111,3 +161,46 @@ static int absolute_to_relative_settings_event_cb(const zmk_event_t *eh) {
 ZMK_LISTENER(absolute_to_relative_custom_settings, absolute_to_relative_settings_event_cb);
 ZMK_SUBSCRIPTION(absolute_to_relative_custom_settings, zmk_custom_setting_changed);
 ZMK_SUBSCRIPTION(absolute_to_relative_custom_settings, zmk_custom_settings_initialized);
+
+/*
+ * Two nodes can still produce one key, and nothing downstream would say so.
+ *
+ * A key is the owning node's DT_NODE_FULL_NAME, which is the node's own name
+ * and not its path, so devicetree keeps it unique only among its siblings. A
+ * board that puts a converter under /input_processors and a module that puts
+ * one at the root can pick the same name and neither Zephyr nor the settings
+ * registry objects: zmk_custom_setting_find() returns the first match, so a
+ * client's write always lands on whichever linked first while the second
+ * silently keeps its devicetree values and appears in the list as though it
+ * were being edited. A stored value restores into only one of them too.
+ *
+ * String equality across instances is not something the preprocessor can
+ * evaluate, so the check runs once at startup and names the duplicated key. It
+ * walks descriptors, not values, so it needs nothing from settings_load().
+ */
+static int abs2rel_check_unique_keys(void) {
+    ZMK_CUSTOM_SETTING_FOREACH(setting) {
+        if (strcmp(setting->custom_subsystem_id, ZMK_INPUT_ABS2REL_SUBSYSTEM) != 0) {
+            continue;
+        }
+
+        ZMK_CUSTOM_SETTING_FOREACH(other) {
+            if (other == setting) {
+                /* Only report a pair once: stop at the first of the two. */
+                break;
+            }
+
+            if (strcmp(other->custom_subsystem_id, ZMK_INPUT_ABS2REL_SUBSYSTEM) == 0 &&
+                strcmp(other->key, setting->key) == 0) {
+                LOG_ERR("Duplicate setting key \"%s\": two devicetree nodes share a "
+                        "name, so only one of them is editable",
+                        setting->key);
+            }
+        }
+    }
+
+    return 0;
+}
+
+SYS_INIT(abs2rel_check_unique_keys, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
+

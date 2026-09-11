@@ -103,7 +103,7 @@ with nothing left to release it. That record is cleared on a layer change too.
 `CONFIG_ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS=y` publishes both flags through
 [zmk-feature-custom-settings](https://github.com/cormoran/zmk-feature-custom-settings),
 so a Studio client lists and edits them with no page of its own, under the
-`amgskobo__abs2rel` subsystem.
+`amgs_a2r` subsystem.
 
 A key is the owning node's devicetree name, then the field:
 
@@ -119,8 +119,11 @@ which is `DT_NODE_FULL_NAME()` — the same string the key is built from. So a
 stage's settings are exactly the keys starting with its device name, with
 nothing registered, agreed between modules, or typed into devicetree.
 
-The longest field is `suppress_btn_touch` at 18 characters, which leaves a node
-28 of the 47 a key has. A name that overruns fails the build, by name.
+The longest field is `suppress_btn_touch` at 18 characters. Its complete
+persisted name leaves the node **19 characters**: the 48-byte RPC key limit is
+not enough on its own because Zephyr also stores
+`custom_settings/<subsystem>/<key>` in a 64-byte name. A name that overruns
+either limit fails the build, by name.
 
 The option needs the patched ZMK that carries the custom Studio RPC protocol,
 which is why it depends on `ZMK_CUSTOM_SETTINGS_STUDIO_RPC` rather than on the
