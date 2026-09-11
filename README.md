@@ -1,5 +1,7 @@
 # ZMK Absolute-to-Relative Input Processor
 
+[日本語](README_JA.md)
+
 Converts absolute pointer coordinates into relative motion, smoothed over two
 samples. For trackpads and touch sensors that report where the finger *is*,
 feeding a pointer stack that wants to know how far it *moved*.
