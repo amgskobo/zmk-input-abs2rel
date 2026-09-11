@@ -139,7 +139,7 @@ it — it builds and runs on upstream ZMK with no other module present.
 ├── Kconfig
 ├── drivers/input/
 │   ├── input_processor_absolute_to_relative.c
-│   └── absolute_to_relative_custom_settings.c   # only this needs the patched ZMK
+│   └── input_processor_absolute_to_relative_custom_settings.c   # only this needs the patched ZMK
 ├── include/zmk-input-abs2rel/
 │   ├── absolute_to_relative.h                   # runtime API
 │   └── custom_settings.h                        # namespace and key shape

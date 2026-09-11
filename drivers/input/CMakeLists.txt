@@ -10,5 +10,5 @@ if (CONFIG_ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS)
     # On the app target rather than this module's library: it includes
     # zmk/studio/custom.h, which pulls ZMK's nanopb-generated
     # proto/zmk/custom.pb.h, and that header is only on the app include path.
-    target_sources(app PRIVATE absolute_to_relative_custom_settings.c)
+    target_sources(app PRIVATE input_processor_absolute_to_relative_custom_settings.c)
 endif()
