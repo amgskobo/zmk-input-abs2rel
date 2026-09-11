@@ -6,10 +6,18 @@
         status = "okay";
         compatible = "zmk,input-processor-absolute-to-relative";
         #input-processor-cells = <0>;
-        /* Optional. Both are boolean: present means true, absent means false. */
-        /* Consume INPUT_BTN_TOUCH so it does not reach the mouse HID. */
-        // suppress-btn-touch;
-        /* Consume INPUT_BTN_0 when the trackpad reports a physical click. */
+        /* BTN_TOUCH is converter state, not a host mouse button. */
+        suppress-btn-touch;
+        /* Optional: consume INPUT_BTN_0 when the trackpad reports a click. */
         // suppress-btn0;
+    };
+
+    /* Standard scroll route: neither contact nor a click reaches the host. */
+    zip_absolute_to_relative_scroll: abs_rel_scroll {
+        status = "okay";
+        compatible = "zmk,input-processor-absolute-to-relative";
+        #input-processor-cells = <0>;
+        suppress-btn-touch;
+        suppress-btn0;
     };
 };
