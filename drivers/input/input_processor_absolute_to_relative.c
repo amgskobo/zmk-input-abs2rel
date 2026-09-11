@@ -101,8 +101,8 @@ static inline void drop_reference(struct absolute_to_relative_data *data) {
  * Process absolute-to-relative conversion for a single axis
  * Returns true if first position (should suppress event), false if normal motion
  */
-static inline bool process_axis(struct input_event *event, uint16_t *previous_pos, int16_t *previous_delta,
-                         uint16_t rel_code) {
+static inline bool process_axis(struct input_event *event, uint16_t *previous_pos,
+                                int16_t *previous_delta, uint16_t rel_code) {
     const uint16_t value = event->value;
 
     uint16_t prev = *previous_pos;
@@ -111,7 +111,8 @@ static inline bool process_axis(struct input_event *event, uint16_t *previous_po
         *previous_pos = value;
         *previous_delta = 0;
         if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-            LOG_DBG("Initial %s position: %u (suppressed)", (rel_code == INPUT_REL_X) ? "X" : "Y", value);
+            LOG_DBG("Initial %s position: %u (suppressed)",
+                    (rel_code == INPUT_REL_X) ? "X" : "Y", value);
         }
 
         /* Mark event as invalid for clarity */
