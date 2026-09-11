@@ -8,20 +8,44 @@
  * client groups the list it renders by subsystem, so this is also the heading
  * a person reads. It is named for the module rather than for anything about
  * the processor, because the module is what the heading collects.
+ *
+ * It is short because it is spent, not read. The stored settings name is
+ * "custom_settings/<subsystem>/<key>" against Zephyr's 64-byte
+ * SETTINGS_MAX_NAME_LEN, so every character here is a character taken from
+ * every node name in every board that uses this module. A heading is read once
+ * as a group label with the rows under it already naming their nodes; a node
+ * name has to survive in the key. See ASSERT_NAME_FITS below.
  */
 
 #pragma once
 
 #include <zephyr/devicetree.h>
+#include <zephyr/settings/settings.h>
 #include <zephyr/sys/util.h>
 
-#define ZMK_INPUT_ABS2REL_SUBSYSTEM "amgskobo__abs2rel"
+/*
+ * The identifier is spelled once, as a token.
+ *
+ * custom-settings takes the subsystem as a string in every setting it
+ * registers, while ZMK's ZMK_RPC_CUSTOM_SUBSYSTEM takes it as a token and
+ * stringifies it to get the registered id. Spelling it twice is a silent
+ * failure if the two ever disagree: the settings define fine, the subsystem
+ * registers fine under the other name, and every setting is then dropped with
+ * -ENOENT because no subsystem of its name is registered. So the token is the
+ * definition and the string is derived from it, and the registration passes
+ * the token through a wrapper so that it expands before being stringified.
+ */
+#define ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN amgs_a2r
+#define ZMK_INPUT_ABS2REL_SUBSYSTEM STRINGIFY(ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN)
 
 /*
  * A setting key is the owning node's devicetree name, then the field:
  *
  *     pointer_abs_rel.suppress_btn_touch
  *     scroll_abs_rel.suppress_btn0
+ *
+ * The field is the devicetree property with its hyphens as underscores, so a
+ * board author reads the same name in both places.
  *
  * The node name is the one identifier both halves of the problem already hold.
  * A view drawing the chain walks devicetree for the processors in each
@@ -40,20 +64,43 @@
 #define ZMK_INPUT_ABS2REL_SETTING_KEY(n, field) DT_NODE_FULL_NAME(DT_DRV_INST(n)) "." field
 
 /*
- * Fail by name when a node cannot fit a settings key.
+ * The name a setting is stored under, which is longer than its key.
  *
- * custom-settings already refuses a key over
- * CONFIG_ZMK_CUSTOM_SETTINGS_KEY_MAX_LEN, but it can only say that some key
- * was too long: the key is built inside its own macro, so the message names
- * the settings file and not the devicetree node that caused it. Since the
- * length is the node's name plus the field, the node is the only thing anyone
- * can act on.
+ * custom-settings prefixes its own subtree and the subsystem before saving:
+ * setting_storage_name() builds "custom_settings/<subsystem>/<key>" into a
+ * SETTINGS_MAX_NAME_LEN buffer and returns -ENAMETOOLONG if it does not fit.
+ * "custom_settings" is private to that module, so it is spelled out here; if
+ * it ever changes, this over-estimates or under-estimates the budget and the
+ * assert below is the thing to fix.
+ */
+#define ZMK_INPUT_ABS2REL_STORAGE_NAME(n, field)                                                   \
+    "custom_settings/" ZMK_INPUT_ABS2REL_SUBSYSTEM "/" ZMK_INPUT_ABS2REL_SETTING_KEY(n, field)
+
+/*
+ * Fail by name, at build time, when a node cannot fit a settings key.
  *
- * The longest field here is "suppress_btn_touch" at 18, which leaves a node
- * 28 characters of the 47 a key has.
+ * There are two limits and they are not the same one. custom-settings refuses
+ * a key over CONFIG_ZMK_CUSTOM_SETTINGS_KEY_MAX_LEN (48) at build time, which
+ * is the Studio RPC protobuf's limit on the key alone. Zephyr's settings
+ * subsystem separately refuses a *stored name* over SETTINGS_MAX_NAME_LEN
+ * (64), which covers the subtree and the subsystem too -- and it refuses it at
+ * runtime, inside the save path, long after the value has been accepted over
+ * RPC and applied to the hardware. The setting reads back correctly for as
+ * long as the keyboard stays powered and is simply gone after a reboot.
+ *
+ * Nothing in custom-settings checks the two together, and they are not jointly
+ * satisfiable: 48 + 32 + the prefixes is well past 64. So the second limit is
+ * checked here, where the node that caused it can be named.
+ *
+ * The longest field is "suppress_btn_touch" at 18, which with "amgs_a2r"
+ * leaves a node 19 characters.
  */
 #define ZMK_INPUT_ABS2REL_ASSERT_NAME_FITS(n, longest_field)                                       \
     BUILD_ASSERT(sizeof(ZMK_INPUT_ABS2REL_SETTING_KEY(n, longest_field)) <=                        \
                      CONFIG_ZMK_CUSTOM_SETTINGS_KEY_MAX_LEN,                                       \
                  "devicetree node \"" DT_NODE_FULL_NAME(DT_DRV_INST(n))                            \
-                 "\" has a name too long to key its settings; shorten the node name");
+                 "\" has a name too long to key its settings; shorten the node name");             \
+    BUILD_ASSERT(sizeof(ZMK_INPUT_ABS2REL_STORAGE_NAME(n, longest_field)) <=                       \
+                     SETTINGS_MAX_NAME_LEN,                                                        \
+                 "devicetree node \"" DT_NODE_FULL_NAME(DT_DRV_INST(n))                            \
+                 "\" has a name too long to store its settings under; shorten the node name");

@@ -1,6 +1,8 @@
 
 / {
-    zip_absolute_to_relative: zip_absolute_to_relative {
+    /* Keep the reference label stable; the short node name is the persisted
+     * custom-settings key prefix. */
+    zip_absolute_to_relative: abs_rel {
         status = "okay";
         compatible = "zmk,input-processor-absolute-to-relative";
         #input-processor-cells = <0>;
