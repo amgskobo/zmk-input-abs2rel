@@ -1,0 +1,6 @@
+name: zmk-input-abs2rel
+build:
+  cmake: .
+  kconfig: Kconfig
+  settings:
+    dts_root: .
