@@ -35,14 +35,14 @@
  * definition and the string is derived from it, and the registration passes
  * the token through a wrapper so that it expands before being stringified.
  */
-#define ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN amgs_a2r
+#define ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN amgskobo__a2r
 #define ZMK_INPUT_ABS2REL_SUBSYSTEM STRINGIFY(ZMK_INPUT_ABS2REL_SUBSYSTEM_TOKEN)
 
 /*
  * A setting key is the owning node's devicetree name, then the field:
  *
- *     pointer_abs_rel.suppress_btn_touch
- *     scroll_abs_rel.suppress_btn0
+ *     abs_rel.suppress_btn_touch
+ *     abs_rel_scroll.suppress_btn0
  *
  * The field is the devicetree property with its hyphens as underscores, so a
  * board author reads the same name in both places.
@@ -92,8 +92,8 @@
  * satisfiable: 48 + 32 + the prefixes is well past 64. So the second limit is
  * checked here, where the node that caused it can be named.
  *
- * The longest field is "suppress_btn_touch" at 18, which with "amgs_a2r"
- * leaves a node 19 characters.
+ * The longest field is "suppress_btn_touch" at 18, which with
+ * "amgskobo__a2r" leaves a node 14 characters.
  */
 #define ZMK_INPUT_ABS2REL_ASSERT_NAME_FITS(n, longest_field)                                       \
     BUILD_ASSERT(sizeof(ZMK_INPUT_ABS2REL_SETTING_KEY(n, longest_field)) <=                        \

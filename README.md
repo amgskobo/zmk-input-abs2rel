@@ -54,11 +54,18 @@ pointer_abs_rel: pointer_abs_rel {
 };
 ```
 
+The module supplies two standard nodes:
+
+| Reference | Node name | Button handling |
+| :--- | :--- | :--- |
+| `zip_absolute_to_relative` | `abs_rel` | suppresses `BTN_TOUCH`; preserves `BTN_0` clicks |
+| `zip_absolute_to_relative_scroll` | `abs_rel_scroll` | suppresses both `BTN_TOUCH` and `BTN_0` for scrolling |
+
 ### Configuration Reference
 
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `suppress-btn-touch` | bool | false | Consume `INPUT_BTN_TOUCH` after using it to drop the reference point, so it does not reach the mouse HID as a button press. |
+| `suppress-btn-touch` | bool | module default: true; manually declared node: false | Consume `INPUT_BTN_TOUCH` after using it to drop the reference point, so it does not reach the mouse HID as a button press. |
 | `suppress-btn0` | bool | false | Consume `INPUT_BTN_0` when the trackpad reports a physical click. |
 
 Both are runtime values when the settings option below is on — they decide
@@ -103,13 +110,13 @@ with nothing left to release it. That record is cleared on a layer change too.
 `CONFIG_ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS=y` publishes both flags through
 [zmk-feature-custom-settings](https://github.com/cormoran/zmk-feature-custom-settings),
 so a Studio client lists and edits them with no page of its own, under the
-`amgs_a2r` subsystem.
+`amgskobo__a2r` subsystem.
 
 A key is the owning node's devicetree name, then the field:
 
 ```
-pointer_abs_rel.suppress_btn_touch
-scroll_abs_rel.suppress_btn0
+abs_rel.suppress_btn_touch
+abs_rel_scroll.suppress_btn0
 ```
 
 The node name is the one identifier both halves of the problem already hold: a
@@ -120,7 +127,7 @@ stage's settings are exactly the keys starting with its device name, with
 nothing registered, agreed between modules, or typed into devicetree.
 
 The longest field is `suppress_btn_touch` at 18 characters. Its complete
-persisted name leaves the node **19 characters**: the 48-byte RPC key limit is
+persisted name leaves the node **14 characters**: the 48-byte RPC key limit is
 not enough on its own because Zephyr also stores
 `custom_settings/<subsystem>/<key>` in a 64-byte name. A name that overruns
 either limit fails the build, by name.
