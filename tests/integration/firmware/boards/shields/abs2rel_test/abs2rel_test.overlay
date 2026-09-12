@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2026 amgskobo
+ * SPDX-License-Identifier: MIT
+ */
+
+#include <behaviors/input_processor_absolute_to_relative.dtsi>
+#include <physical_layouts.dtsi>
+#include <dt-bindings/zmk/matrix_transform.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+    chosen {
+        zmk,kscan = &abs2rel_kscan;
+        zmk,physical-layout = &abs2rel_layout;
+    };
+
+    abs2rel_kscan: abs2rel_kscan {
+        compatible = "zmk,kscan-mock";
+        rows = <1>;
+        columns = <1>;
+        events = <>;
+    };
+
+    abs2rel_transform: abs2rel_transform {
+        compatible = "zmk,matrix-transform";
+        rows = <1>;
+        columns = <1>;
+        map = <RC(0, 0)>;
+    };
+
+    abs2rel_layout: abs2rel_layout {
+        compatible = "zmk,physical-layout";
+        display-name = "Abs2rel test";
+        transform = <&abs2rel_transform>;
+        keys = <&key_physical_attrs 100 100 0 0 0 0 0>;
+    };
+
+    abs2rel_source: abs2rel_source {
+        compatible = "zmk,input-mock";
+        event-period = <100>;
+        events = <INPUT_EV_ABS INPUT_ABS_X 100 0
+                  INPUT_EV_ABS INPUT_ABS_Y 100 1>;
+    };
+
+    /* Deliberately omit suppress-btn-touch to compile-test its true default. */
+    abs2rel_default: a2r_default {
+        compatible = "zmk,input-processor-absolute-to-relative";
+        #input-processor-cells = <0>;
+    };
+
+    abs2rel_listener {
+        compatible = "zmk,input-listener";
+        device = <&abs2rel_source>;
+        input-processors = <&abs2rel_default>;
+    };
+};
