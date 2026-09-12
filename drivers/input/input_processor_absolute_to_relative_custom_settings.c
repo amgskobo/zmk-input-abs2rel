@@ -79,12 +79,11 @@ static bool abs2rel_namespace_handler(const zmk_custom_CallRequest *request,
     return false;
 }
 
-#define ABSOLUTE_TO_RELATIVE_SETTING(n, field, key)                                                \
+#define ABSOLUTE_TO_RELATIVE_SETTING(n, field, key, default_value)                                 \
     ZMK_CUSTOM_SETTING_DEFINE_WITH_CONSTRAINTS(                                                    \
-        absolute_to_relative_cs_##field##_##n, ZMK_INPUT_ABS2REL_SUBSYSTEM,                     \
-        ZMK_INPUT_ABS2REL_SETTING_KEY(n, key),                                \
-        ZMK_CUSTOM_SETTING_VALUE_TYPE_BOOL,                                                        \
-        ZMK_CUSTOM_SETTING_VALUE_BOOL(DT_INST_PROP_OR(n, field, false)),                           \
+        absolute_to_relative_cs_##field##_##n, ZMK_INPUT_ABS2REL_SUBSYSTEM,                        \
+        ZMK_INPUT_ABS2REL_SETTING_KEY(n, key), ZMK_CUSTOM_SETTING_VALUE_TYPE_BOOL,                 \
+        ZMK_CUSTOM_SETTING_VALUE_BOOL(DT_INST_PROP_OR(n, field, default_value)),                   \
         ZMK_CUSTOM_SETTING_CONFIDENTIALITY_RPC_PUBLIC, ZMK_CUSTOM_SETTING_PERMISSION_UNSECURE,     \
         ZMK_CUSTOM_SETTING_PERMISSION_SECURE, ZMK_CUSTOM_SETTING_NO_CONSTRAINT);
 
@@ -95,9 +94,9 @@ static bool abs2rel_namespace_handler(const zmk_custom_CallRequest *request,
  * label that hides a negation is worse than a long one.
  */
 #define ABSOLUTE_TO_RELATIVE_SETTINGS(n)                                                           \
-    ZMK_INPUT_ABS2REL_ASSERT_NAME_FITS(n, "suppress_btn_touch")                                 \
-    ABSOLUTE_TO_RELATIVE_SETTING(n, suppress_btn_touch, "suppress_btn_touch")                      \
-    ABSOLUTE_TO_RELATIVE_SETTING(n, suppress_btn0, "suppress_btn0")
+    ZMK_INPUT_ABS2REL_ASSERT_NAME_FITS(n, "suppress_btn_touch")                                    \
+    ABSOLUTE_TO_RELATIVE_SETTING(n, suppress_btn_touch, "suppress_btn_touch", true)                \
+    ABSOLUTE_TO_RELATIVE_SETTING(n, suppress_btn0, "suppress_btn0", false)
 
 DT_INST_FOREACH_STATUS_OKAY(ABSOLUTE_TO_RELATIVE_SETTINGS)
 
@@ -204,4 +203,3 @@ static int abs2rel_check_unique_keys(void) {
 }
 
 SYS_INIT(abs2rel_check_unique_keys, APPLICATION, CONFIG_APPLICATION_INIT_PRIORITY);
-

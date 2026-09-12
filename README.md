@@ -1,5 +1,7 @@
 # ZMK Absolute-to-Relative Input Processor
 
+[![Test](https://github.com/amgskobo/zmk-input-abs2rel/actions/workflows/test.yml/badge.svg)](https://github.com/amgskobo/zmk-input-abs2rel/actions/workflows/test.yml)
+
 [日本語](README_JA.md)
 
 Converts absolute pointer coordinates into relative motion, smoothed over two
@@ -45,29 +47,46 @@ manifest:
 };
 ```
 
-Or declare the node yourself, which is worth doing when more than one instance
-is routed or when the name matters — it is the settings key (see below):
+Or declare the node yourself when another independent input stream needs its
+own conversion history, or when the name matters — it is the settings key (see
+below):
 
 ```dts
 pointer_abs_rel: pointer_abs_rel {
     compatible = "zmk,input-processor-absolute-to-relative";
     #input-processor-cells = <0>;
-    suppress-btn-touch;
 };
 ```
 
-The module supplies two standard nodes:
+`INPUT_BTN_TOUCH` suppression defaults to true, including on a manually
+declared node. The explicit property remains accepted so existing overlays and
+overlays that want to document the policy keep building.
+
+Devicetree boolean properties express `true` by being present; they cannot
+carry a `false` value. Therefore a build without runtime custom settings always
+suppresses `BTN_TOUCH`. Enable the custom-settings option below when the flag
+must be switchable to `false`.
+
+The module supplies four standard nodes:
 
 | Reference | Node name | Button handling |
 | :--- | :--- | :--- |
 | `zip_absolute_to_relative` | `abs_rel` | suppresses `BTN_TOUCH`; preserves `BTN_0` clicks |
 | `zip_absolute_to_relative_scroll` | `abs_rel_scroll` | suppresses both `BTN_TOUCH` and `BTN_0` for scrolling |
+| `zip_absolute_to_relative_right` | `abs_rel_r` | independent pointer state for a right-side input |
+| `zip_absolute_to_relative_scroll_right` | `abs_rel_scr_r` | independent scroll state for a right-side input |
+
+State belongs to a processor node. Do not route two independent or concurrently
+usable devices through the same node: their reference positions and smoothing
+history would be shared. The two `*_right` nodes exist so a common two-half
+keyboard can give its local and proxied trackpads separate state. Declare more
+short-named instances for more sources.
 
 ### Configuration Reference
 
 | Property | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `suppress-btn-touch` | bool | module default: true; manually declared node: false | Consume `INPUT_BTN_TOUCH` after using it to drop the reference point, so it does not reach the mouse HID as a button press. |
+| `suppress-btn-touch` | bool | true | Consume `INPUT_BTN_TOUCH` after using it to drop the reference point, so it does not reach the mouse HID as button 0. |
 | `suppress-btn0` | bool | false | Consume `INPUT_BTN_0` when the trackpad reports a physical click. |
 
 Both are runtime values when the settings option below is on — they decide
@@ -75,6 +94,12 @@ whether a pad's physical click reaches the host at all, which is the kind of
 thing that wants trying rather than deciding. On a pad that also carries
 tap-to-click, one setting is a duplicate button and the other is a missing one,
 and which is which depends on the pad.
+
+When runtime settings turn `suppress-btn-touch` off, each forwarded touch edge
+is made a synchronization boundary of its own. This is necessary because the
+first coordinates after an edge establish a new reference and are consumed;
+without a separate boundary a release could remain queued with no later event
+to send it, leaving mouse button 0 held at the host.
 
 Turning `suppress-btn0` off does not release a press already swallowed: that
 press's release still passes through, for the same reason it does across a
@@ -100,7 +125,17 @@ active at that moment, so one contact can be split across two chains. The
 instance a contact moves to would otherwise still hold a reference point from
 an earlier touch, and turn its first sample into the distance between two
 unrelated contacts — a jump across the pad from a single count of real motion.
-So `zmk_layer_state_changed` is subscribed directly and drops the reference.
+So `zmk_layer_state_changed` is subscribed directly and invalidates every
+reference. The callback only increments an atomic generation. The input thread
+applies that generation itself; if it changes while an event is being
+processed, that event is discarded and the new generation starts clean. The
+layer callback and coordinate conversion therefore never write the same state
+concurrently.
+
+**Value range**: the conversion core preserves the full signed `int32_t` range
+used by Zephyr input events. Differences wider than that range are saturated
+before smoothing instead of wrapping. The output remains an `int32_t` relative
+event for the processors and listener downstream.
 
 `suppress-btn0` never drops a `BTN_0` release whose press was not suppressed
 here. Passing a release through is always safe — the press it belongs to
@@ -119,6 +154,8 @@ A key is the owning node's devicetree name, then the field:
 ```
 abs_rel.suppress_btn_touch
 abs_rel_scroll.suppress_btn0
+abs_rel_r.suppress_btn_touch
+abs_rel_scr_r.suppress_btn0
 ```
 
 The node name is the one identifier both halves of the problem already hold: a
@@ -153,14 +190,35 @@ it — it builds and runs on upstream ZMK with no other module present.
 │   ├── input_processor_absolute_to_relative.c
 │   └── input_processor_absolute_to_relative_custom_settings.c   # only this needs the patched ZMK
 ├── include/zmk-input-abs2rel/
+│   ├── absolute_to_relative_core.h              # dependency-free conversion core
 │   ├── absolute_to_relative.h                   # runtime API
 │   └── custom_settings.h                        # namespace and key shape
+├── tests/
+│   ├── integration/                              # upstream and DYA firmware fixtures
+│   ├── run-integration-docker.sh
+│   ├── run.sh
+│   └── test_absolute_to_relative_core.c
 ├── dts/
 │   ├── behaviors/input_processor_absolute_to_relative.dtsi
 │   └── bindings/zmk,input-processor-absolute-to-relative.yaml
 └── zephyr/module.yml
 ```
 
+## Tests
+
+`tests/run.sh` compiles the production conversion core with strict warnings,
+then runs it in optimized and AddressSanitizer/UndefinedBehaviorSanitizer
+builds. It covers first-sample seeding, reset, symmetric negative rounding,
+the full `int32_t` coordinate range and independent streams.
+
+GitHub Actions also builds `tests/integration` against both upstream ZMK with
+custom settings disabled and the DYA fork with custom settings enabled. The
+fixtures exercise the module metadata, Kconfig, Devicetree binding, CMake
+integration and the omitted `suppress-btn-touch` property on a real firmware
+target. The DYA build additionally verifies that the subsystem and representative
+settings keys are linked into the firmware. All checks run for every push and
+pull request and may be started manually.
+
 ## License
 
-MIT
+[MIT](LICENSE)

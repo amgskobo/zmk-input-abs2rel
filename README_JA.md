@@ -1,5 +1,7 @@
 # ZMK Absolute-to-Relative Input Processor
 
+[![Test](https://github.com/amgskobo/zmk-input-abs2rel/actions/workflows/test.yml/badge.svg)](https://github.com/amgskobo/zmk-input-abs2rel/actions/workflows/test.yml)
+
 [English](README.md)
 
 絶対座標を報告するトラックパッドやタッチセンサーの座標を、相対的な
@@ -41,41 +43,60 @@ module の標準 node を使う場合は DTS を include します。
 };
 ```
 
-複数の変換器が必要な場合や node 名を自分で決める場合は、互換性名を指定して
-node を宣言できます。
+独立した入力streamごとに変換履歴を分ける場合や、node 名を自分で決める場合は、
+互換性名を指定して node を宣言できます。
 
 ```dts
 pointer_abs_rel: pointer_abs_rel {
     compatible = "zmk,input-processor-absolute-to-relative";
     #input-processor-cells = <0>;
-    suppress-btn-touch;
 };
 ```
 
+`INPUT_BTN_TOUCH` の抑止は、手動宣言nodeを含めて既定で有効です。既存overlayとの
+互換性と設定方針の明示用に、`suppress-btn-touch` propertyも引き続き受け付けます。
+
+Devicetreeのboolean propertyは、propertyが存在することで`true`を表し、`false`の値を
+持てません。そのためruntime custom settingsを使わないbuildでは`BTN_TOUCH`は常に
+抑止されます。`false`へ切り替える必要がある場合は、後述のcustom settings optionを
+有効にしてください。
+
 ### 標準 node
 
-module は pointer 用と scroll 用の 2 node を提供します。
+module は local / right それぞれに pointer 用と scroll 用の計 4 node を提供します。
 
 | 参照 label | 実 node 名 | ボタン処理 |
 | :--- | :--- | :--- |
 | `zip_absolute_to_relative` | `abs_rel` | `BTN_TOUCH` を抑止し、`BTN_0` のクリックは通す |
 | `zip_absolute_to_relative_scroll` | `abs_rel_scroll` | scroll 用。`BTN_TOUCH` と `BTN_0` の両方を抑止 |
+| `zip_absolute_to_relative_right` | `abs_rel_r` | 右側入力用の独立したpointer状態 |
+| `zip_absolute_to_relative_scroll_right` | `abs_rel_scr_r` | 右側入力用の独立したscroll状態 |
 
 通常 pointer は前者、クリックをホストへ送らない scroll 経路は後者を使います。
+
+変換状態はprocessor nodeに属します。独立して使用できる2台のdeviceを同じnodeへ
+接続しないでください。基準座標と平滑化履歴が共有されるためです。左右分割keyboardで
+localとproxyのtrackpadを分離できるよう、標準の右側用nodeを用意しています。3台以上の
+入力には、短い固有名を持つnodeを追加してください。
 
 ### 設定プロパティ
 
 | プロパティ | 型 | 既定値 | 説明 |
 | :--- | :--- | :--- | :--- |
-| `suppress-btn-touch` | bool | module 標準 node は true。手動宣言 node は false | 基準点の更新に使った `INPUT_BTN_TOUCH` を下流の HID へ送らない |
+| `suppress-btn-touch` | bool | true | 基準点の更新に使った `INPUT_BTN_TOUCH` を抑止し、ZMKでmouse button 0として扱われないようにする |
 | `suppress-btn0` | bool | false | トラックパッドがクリックとして送る `INPUT_BTN_0` を抑止する |
 
-module の標準 node では `suppress-btn-touch` が有効です。手動で node を宣言する
-場合にのみ、接触状態を意図的に下流へ渡すために省略できます。
+`suppress-btn-touch` は、module の標準 node と手動宣言 node のどちらでも既定で
+有効です。接触状態を意図的に下流へ渡す場合は、runtime settings で無効にします。
 
-`suppress-btn0` を有効にした後で無効へ変更しても、すでに抑止した press の
-release は戻りません。release だけを抑止すると、ホスト上でボタンが押しっぱなしに
-なるためです。
+`suppress-btn0` を有効にした後で無効へ変更しても、抑止済みpressをhostへ後から
+送信することはありません。続くreleaseは安全のため通過させます。そのpressをhostは
+受け取っていないため、通常このreleaseは何も解除しません。逆に、hostへ届いたpressの
+releaseだけを抑止すると、buttonが押しっぱなしになるためです。
+
+runtime設定で `suppress-btn-touch` を無効にした場合、通過するtouch edgeはそれ自体を
+sync境界にします。edge直後の最初の座標pairは基準点として消費されるため、別のsyncが
+なければreleaseがhostへ送られず、mouse button 0が押されたままになるからです。
 
 ## 動作
 
@@ -95,6 +116,17 @@ smooth = (current_delta + previous_delta) / 2
 input processor chain が変わる途中で古い基準点を残すと、別の接触との距離を移動量と
 して扱い、ポインターが跳ぶ原因になるためです。
 
+layer変更callbackは変換状態を直接変更せず、atomic generation counterだけを進めます。
+input threadはevent処理の前後でgenerationを比較し、途中で変わったeventを破棄してから
+新しい基準点を作ります。これによりlayer callbackと座標変換が同じ状態へ同時に書き込む
+ことを避けます。
+
+### 座標範囲
+
+Zephyr `input_event.value` のsigned `int32_t` 全域を保持します。2座標間の差がその範囲を
+超える場合はwrapさせず、平滑化前に `INT32_MIN` または `INT32_MAX` へ飽和します。
+下流へ渡すrelative eventも `int32_t` です。
+
 ## DYA Studio での実行時設定
 
 `CONFIG_ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS=y` を有効にすると、
@@ -107,6 +139,8 @@ input processor chain が変わる途中で古い基準点を残すと、別の�
 ```text
 abs_rel.suppress_btn_touch
 abs_rel_scroll.suppress_btn0
+abs_rel_r.suppress_btn_touch
+abs_rel_scr_r.suppress_btn0
 ```
 
 ### 名前の長さ制限
@@ -136,11 +170,30 @@ node 名は最大 **14 文字**です。`abs_rel_scroll` は 14 文字で、こ�
 │   ├── behaviors/input_processor_absolute_to_relative.dtsi
 │   └── bindings/zmk,input-processor-absolute-to-relative.yaml
 ├── include/zmk-input-abs2rel/
+│   ├── absolute_to_relative_core.h
 │   ├── absolute_to_relative.h
 │   └── custom_settings.h
+├── tests/
+│   ├── integration/                 # upstream / DYA firmware fixture
+│   ├── run-integration-docker.sh
+│   ├── run.sh
+│   └── test_absolute_to_relative_core.c
 └── zephyr/module.yml
 ```
 
+## テスト
+
+`tests/run.sh` はproductionと同じ変換coreを厳格なcompiler warning設定でbuildし、通常の
+最適化buildとAddressSanitizer／UndefinedBehaviorSanitizer buildの両方を実行します。
+最初のsample、reset、正負対称の丸め、`int32_t` 全域、独立streamを検証します。
+
+GitHub Actionsではさらに、custom settingsを無効にしたupstream ZMKと、有効にした
+DYA forkの両方に対して`tests/integration` のfirmware fixtureをbuildします。module
+metadata、Kconfig、Devicetree binding、CMake integrationに加えて、
+`suppress-btn-touch`を省略した場合も実機firmware targetでcompileできることを確認します。
+DYA buildではsubsystemと代表的なsettings keyがfirmwareへlinkされたことも検証します。
+すべてのcheckをpush、pull request、手動実行で利用できます。
+
 ## License
 
-MIT
+[MIT](LICENSE)

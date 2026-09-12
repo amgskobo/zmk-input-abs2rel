@@ -98,9 +98,9 @@
 #define ZMK_INPUT_ABS2REL_ASSERT_NAME_FITS(n, longest_field)                                       \
     BUILD_ASSERT(sizeof(ZMK_INPUT_ABS2REL_SETTING_KEY(n, longest_field)) <=                        \
                      CONFIG_ZMK_CUSTOM_SETTINGS_KEY_MAX_LEN,                                       \
-                 "devicetree node \"" DT_NODE_FULL_NAME(DT_DRV_INST(n))                            \
-                 "\" has a name too long to key its settings; shorten the node name");             \
-    BUILD_ASSERT(sizeof(ZMK_INPUT_ABS2REL_STORAGE_NAME(n, longest_field)) <=                       \
-                     SETTINGS_MAX_NAME_LEN,                                                        \
-                 "devicetree node \"" DT_NODE_FULL_NAME(DT_DRV_INST(n))                            \
-                 "\" has a name too long to store its settings under; shorten the node name");
+                 "devicetree node \"" DT_NODE_FULL_NAME(DT_DRV_INST(                               \
+                     n)) "\" has a name too long to key its settings; shorten the node name");     \
+    BUILD_ASSERT(                                                                                  \
+        sizeof(ZMK_INPUT_ABS2REL_STORAGE_NAME(n, longest_field)) <= SETTINGS_MAX_NAME_LEN,         \
+        "devicetree node \"" DT_NODE_FULL_NAME(DT_DRV_INST(                                        \
+            n)) "\" has a name too long to store its settings under; shorten the node name");

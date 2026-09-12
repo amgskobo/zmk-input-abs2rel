@@ -11,18 +11,20 @@
 #include <zephyr/input/input.h>
 #include <drivers/input_processor.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 #include <zephyr/devicetree.h>
 #include <zmk/event_manager.h>
 #include <zmk/events/layer_state_changed.h>
 
 #include <zmk-input-abs2rel/absolute_to_relative.h>
+#include <zmk-input-abs2rel/absolute_to_relative_core.h>
 
 LOG_MODULE_REGISTER(absolute_to_relative, CONFIG_ZMK_LOG_LEVEL);
 
-/* Sentinel values for uninitialized coordinates */
-#define COORD_UNINITIALIZED UINT16_MAX
-#define COORD_INVALID_ZERO  0xFFF
+#define COORD_INVALID_ZERO 0xFFF
+#define SUPPRESS_BTN_TOUCH_BIT 0
+#define SUPPRESS_BTN0_BIT 1
 
 /* The devicetree values, which seed the live ones in data at init. */
 struct absolute_to_relative_config {
@@ -30,16 +32,9 @@ struct absolute_to_relative_config {
 };
 
 struct absolute_to_relative_data {
-    /*
-     * Written from the input thread and cleared from whichever thread raises a
-     * layer change. No lock: each field is a single aligned store, the clearing
-     * side only ever invalidates and the reading side only ever re-establishes,
-     * so a half-seen clear costs at most one more sample against the old
-     * reference. A lock would not buy the pair of axes either - they arrive as
-     * separate events, so a change can always land between them.
-     */
-    uint16_t previous_x, previous_y;
-    int16_t previous_dx, previous_dy;
+    /* Written only by the input thread; layer callbacks change the generation. */
+    struct absolute_to_relative_axis_state x;
+    struct absolute_to_relative_axis_state y;
     /*
      * Set while a BTN_0 press has been suppressed here and its release has not
      * been seen yet. Suppression has to stay paired: which processors run is
@@ -50,13 +45,29 @@ struct absolute_to_relative_data {
      */
     bool btn0_press_suppressed;
     /*
-     * The live suppression flags. Two independent booleans, each read and
-     * written as a single aligned store, and neither one's correctness depends
-     * on the other's value, so they need no lock the way a ratio or a set of
-     * orientation flags does.
+     * A layer callback can run outside the input thread. It only increments
+     * this atomic generation; the input thread remains the sole writer of all
+     * conversion state. If the generation moves during an event, that event is
+     * discarded and the new generation starts from a clean reference.
      */
-    struct absolute_to_relative_suppression suppression;
+    atomic_t reset_generation;
+    atomic_val_t applied_generation;
+    /* Runtime settings callbacks and input handling may run in different contexts. */
+    atomic_t suppression_flags;
 };
+
+static atomic_val_t encode_suppression(const struct absolute_to_relative_suppression *suppression) {
+    atomic_val_t flags = 0;
+
+    if (suppression->btn_touch) {
+        flags |= BIT(SUPPRESS_BTN_TOUCH_BIT);
+    }
+    if (suppression->btn0) {
+        flags |= BIT(SUPPRESS_BTN0_BIT);
+    }
+
+    return flags;
+}
 
 int absolute_to_relative_get_suppression(const struct device *dev,
                                          struct absolute_to_relative_suppression *out) {
@@ -65,8 +76,12 @@ int absolute_to_relative_get_suppression(const struct device *dev,
     }
 
     const struct absolute_to_relative_data *data = dev->data;
+    atomic_val_t flags = atomic_get(&data->suppression_flags);
 
-    *out = data->suppression;
+    *out = (struct absolute_to_relative_suppression){
+        .btn_touch = (flags & BIT(SUPPRESS_BTN_TOUCH_BIT)) != 0,
+        .btn0 = (flags & BIT(SUPPRESS_BTN0_BIT)) != 0,
+    };
 
     return 0;
 }
@@ -79,7 +94,7 @@ int absolute_to_relative_set_suppression(const struct device *dev,
 
     struct absolute_to_relative_data *data = dev->data;
 
-    data->suppression = *flags;
+    atomic_set(&data->suppression_flags, encode_suppression(flags));
 
     LOG_DBG("%s: suppress btn_touch %d, btn0 %d", dev->name, flags->btn_touch, flags->btn0);
 
@@ -91,28 +106,30 @@ int absolute_to_relative_set_suppression(const struct device *dev,
  * one instead of being measured against a position that no longer relates to it.
  */
 static inline void drop_reference(struct absolute_to_relative_data *data) {
-    data->previous_x = COORD_UNINITIALIZED;
-    data->previous_y = COORD_UNINITIALIZED;
-    data->previous_dx = 0;
-    data->previous_dy = 0;
+    absolute_to_relative_axis_reset(&data->x);
+    absolute_to_relative_axis_reset(&data->y);
+}
+
+static inline void apply_generation(struct absolute_to_relative_data *data,
+                                    atomic_val_t generation) {
+    drop_reference(data);
+    data->btn0_press_suppressed = false;
+    data->applied_generation = generation;
 }
 
 /**
  * Process absolute-to-relative conversion for a single axis
  * Returns true if first position (should suppress event), false if normal motion
  */
-static inline bool process_axis(struct input_event *event, uint16_t *previous_pos,
-                                int16_t *previous_delta, uint16_t rel_code) {
-    const uint16_t value = event->value;
+static inline bool process_axis(struct input_event *event,
+                                struct absolute_to_relative_axis_state *axis, uint16_t rel_code) {
+    int32_t relative;
 
-    uint16_t prev = *previous_pos;
-    if (prev == COORD_UNINITIALIZED) {
-        /* First report on this axis - store position and suppress output */
-        *previous_pos = value;
-        *previous_delta = 0;
+    if (!absolute_to_relative_axis_apply(axis, event->value, &relative)) {
+        /* First report on this axis - store position and suppress output. */
         if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-            LOG_DBG("Initial %s position: %u (suppressed)",
-                    (rel_code == INPUT_REL_X) ? "X" : "Y", value);
+            LOG_DBG("Initial %s position: %d (suppressed)", (rel_code == INPUT_REL_X) ? "X" : "Y",
+                    event->value);
         }
 
         /* Mark event as invalid for clarity */
@@ -132,22 +149,16 @@ static inline bool process_axis(struct input_event *event, uint16_t *previous_po
      * come back to where it started. Division truncates towards zero, which
      * treats both directions alike.
      */
-    int16_t delta = (int16_t)value - (int16_t)prev;
-    int16_t smooth_delta = (delta + *previous_delta) / 2;
-
     if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-        LOG_DBG("%s: %u -> rel_%s: %d (raw_delta: %d, smoothed: %d)",
-                (rel_code == INPUT_REL_X) ? "X" : "Y", value,
-                (rel_code == INPUT_REL_X) ? "x" : "y", smooth_delta, delta, smooth_delta);
+        LOG_DBG("%s: %d -> rel_%s: %d", (rel_code == INPUT_REL_X) ? "X" : "Y", event->value,
+                (rel_code == INPUT_REL_X) ? "x" : "y", relative);
     }
 
     /* Update event and state */
     event->type = INPUT_EV_REL;
     event->code = rel_code;
-    event->value = smooth_delta;
-    *previous_delta = delta;
-    *previous_pos = value;
-    
+    event->value = relative;
+
     return false; /* Signal to continue processing */
 }
 
@@ -165,15 +176,14 @@ static inline bool process_axis(struct input_event *event, uint16_t *previous_po
  * the previous contact; skipping the reset in that case would measure the new
  * contact against the old one's position.
  */
-static int handle_touch_button(struct input_event *event,
-                               struct absolute_to_relative_data *data) {
+static int handle_touch_button(struct input_event *event, struct absolute_to_relative_data *data) {
     drop_reference(data);
 
     if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
         LOG_DBG("Touch %s - reference dropped", event->value ? "started" : "released");
     }
 
-    if (data->suppression.btn_touch) {
+    if (atomic_get(&data->suppression_flags) & BIT(SUPPRESS_BTN_TOUCH_BIT)) {
         if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
             LOG_DBG("Suppressing BTN_TOUCH");
         }
@@ -181,6 +191,12 @@ static int handle_touch_button(struct input_event *event,
         event->sync = false;
         return ZMK_INPUT_PROC_STOP;
     }
+
+    /* The source groups this edge with coordinates using sync=false. Once the
+     * first coordinate pair is consumed as a reference, no later event may be
+     * available to flush a release. A forwarded edge therefore owns a report
+     * boundary of its own. */
+    event->sync = true;
 
     return ZMK_INPUT_PROC_CONTINUE;
 }
@@ -194,7 +210,7 @@ static int handle_touch_button(struct input_event *event,
  */
 static int handle_button_suppress(struct input_event *event,
                                   struct absolute_to_relative_data *data) {
-    if (!data->suppression.btn0) {
+    if (!(atomic_get(&data->suppression_flags) & BIT(SUPPRESS_BTN0_BIT))) {
         /* Not suppressing here, so nothing of ours is outstanding. */
         data->btn0_press_suppressed = false;
         return ZMK_INPUT_PROC_CONTINUE;
@@ -223,51 +239,61 @@ static int handle_button_suppress(struct input_event *event,
 static int absolute_to_relative_handle_event(const struct device *dev, struct input_event *event,
                                              uint32_t param1, uint32_t param2,
                                              struct zmk_input_processor_state *state) {
+    ARG_UNUSED(param1);
+    ARG_UNUSED(param2);
+    ARG_UNUSED(state);
+
     struct absolute_to_relative_data *data = (struct absolute_to_relative_data *)dev->data;
+    atomic_val_t generation_before = atomic_get(&data->reset_generation);
+
+    if (generation_before != data->applied_generation) {
+        apply_generation(data, generation_before);
+    }
+
+    int result = ZMK_INPUT_PROC_CONTINUE;
 
     /* Handle button events */
     if (event->type == INPUT_EV_KEY) {
         if (event->code == INPUT_BTN_TOUCH) {
-            return handle_touch_button(event, data);
+            result = handle_touch_button(event, data);
+        } else if (event->code == INPUT_BTN_0) {
+            result = handle_button_suppress(event, data);
         }
-        if (event->code == INPUT_BTN_0) {
-            return handle_button_suppress(event, data);
+    } else if (event->type == INPUT_EV_ABS) {
+        /*
+         * Convert absolute axes to relative motion.
+         *
+         * There is deliberately no contact-state gate here. Contact state would be
+         * per instance, but an instance only sees the events that arrive while it
+         * holds the chain, and the chain is chosen per event from the layer active
+         * at that moment. An instance that missed the press of the contact now in
+         * progress would gate itself off for the rest of it and pass absolute
+         * events through unconverted - which reads as the pointer dying mid-stroke
+         * until the finger is lifted, and only intermittently, since an instance
+         * that once saw a press without its release stays open by accident.
+         *
+         * The reference point already covers not knowing where the finger was: the
+         * first sample on an axis establishes it and is suppressed, and the next
+         * one converts. That is the same sample every contact spends at its start.
+         */
+        if (event->code == INPUT_ABS_X) {
+            result = process_axis(event, &data->x, INPUT_REL_X) ? ZMK_INPUT_PROC_STOP
+                                                                : ZMK_INPUT_PROC_CONTINUE;
+        } else if (event->code == INPUT_ABS_Y) {
+            result = process_axis(event, &data->y, INPUT_REL_Y) ? ZMK_INPUT_PROC_STOP
+                                                                : ZMK_INPUT_PROC_CONTINUE;
         }
     }
 
-    if (event->type != INPUT_EV_ABS) {
-        return ZMK_INPUT_PROC_CONTINUE;
-    }
-
-    /*
-     * Convert absolute axes to relative motion.
-     *
-     * There is deliberately no contact-state gate here. Contact state would be
-     * per instance, but an instance only sees the events that arrive while it
-     * holds the chain, and the chain is chosen per event from the layer active
-     * at that moment. An instance that missed the press of the contact now in
-     * progress would gate itself off for the rest of it and pass absolute
-     * events through unconverted - which reads as the pointer dying mid-stroke
-     * until the finger is lifted, and only intermittently, since an instance
-     * that once saw a press without its release stays open by accident.
-     *
-     * The reference point already covers not knowing where the finger was: the
-     * first sample on an axis establishes it and is suppressed, and the next
-     * one converts. That is the same sample every contact spends at its start.
-     */
-    bool suppress_event = false;
-
-    if (event->code == INPUT_ABS_X) {
-        suppress_event = process_axis(event, &data->previous_x, &data->previous_dx, INPUT_REL_X);
-    } else if (event->code == INPUT_ABS_Y) {
-        suppress_event = process_axis(event, &data->previous_y, &data->previous_dy, INPUT_REL_Y);
-    }
-
-    if (suppress_event) {
+    atomic_val_t generation_after = atomic_get(&data->reset_generation);
+    if (generation_after != generation_before) {
+        apply_generation(data, generation_after);
+        event->code = COORD_INVALID_ZERO;
+        event->sync = false;
         return ZMK_INPUT_PROC_STOP;
     }
 
-    return ZMK_INPUT_PROC_CONTINUE;
+    return result;
 }
 
 /**
@@ -278,11 +304,13 @@ static int absolute_to_relative_init(const struct device *dev) {
     const struct absolute_to_relative_config *config = dev->config;
 
     data->btn0_press_suppressed = false;
-    data->suppression = config->suppression;
+    atomic_set(&data->suppression_flags, encode_suppression(&config->suppression));
+    atomic_set(&data->reset_generation, 0);
+    data->applied_generation = 0;
     drop_reference(data);
 
-    LOG_INF("Initialized (suppress_btn_touch=%d, suppress_btn0=%d)", data->suppression.btn_touch,
-            data->suppression.btn0);
+    LOG_INF("Initialized (suppress_btn_touch=%d, suppress_btn0=%d)", config->suppression.btn_touch,
+            config->suppression.btn0);
 
     return 0;
 }
@@ -297,26 +325,19 @@ static const struct zmk_input_processor_driver_api absolute_to_relative_driver_a
 /**
  * Device instantiation macro
  */
-#define ABSOLUTE_TO_RELATIVE_INST(n)                                                   \
-    static struct absolute_to_relative_data processor_absolute_to_relative_data_##n = {\
-        .previous_x = COORD_UNINITIALIZED,                                              \
-        .previous_y = COORD_UNINITIALIZED,                                              \
-        .previous_dx = 0,                                                               \
-        .previous_dy = 0,                                                               \
-    };                                                                                  \
-    static const struct absolute_to_relative_config                                    \
-        processor_absolute_to_relative_config_##n = {                                  \
-            .suppression =                                                              \
-                {                                                                       \
-                    .btn_touch = DT_INST_PROP_OR(n, suppress_btn_touch, false),         \
-                    .btn0 = DT_INST_PROP_OR(n, suppress_btn0, false),                   \
-                },                                                                      \
-        };                                                                              \
-    DEVICE_DT_INST_DEFINE(n, absolute_to_relative_init, NULL,                         \
-                          &processor_absolute_to_relative_data_##n,                    \
-                          &processor_absolute_to_relative_config_##n, POST_KERNEL,     \
-                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT,                         \
-                          &absolute_to_relative_driver_api);
+#define ABSOLUTE_TO_RELATIVE_INST(n)                                                               \
+    static struct absolute_to_relative_data processor_absolute_to_relative_data_##n;               \
+    static const struct absolute_to_relative_config processor_absolute_to_relative_config_##n = {  \
+        .suppression =                                                                             \
+            {                                                                                      \
+                .btn_touch = DT_INST_PROP_OR(n, suppress_btn_touch, true),                         \
+                .btn0 = DT_INST_PROP_OR(n, suppress_btn0, false),                                  \
+            },                                                                                     \
+    };                                                                                             \
+    DEVICE_DT_INST_DEFINE(n, absolute_to_relative_init, NULL,                                      \
+                          &processor_absolute_to_relative_data_##n,                                \
+                          &processor_absolute_to_relative_config_##n, POST_KERNEL,                 \
+                          CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &absolute_to_relative_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ABSOLUTE_TO_RELATIVE_INST)
 
@@ -341,15 +362,7 @@ DT_INST_FOREACH_STATUS_OKAY(ABSOLUTE_TO_RELATIVE_INST)
 #define ABSOLUTE_TO_RELATIVE_RESYNC(n)                                                             \
     {                                                                                              \
         struct absolute_to_relative_data *data = DEVICE_DT_INST_GET(n)->data;                      \
-        drop_reference(data);                                                                      \
-        /*                                                                                         \
-         * A press suppressed here whose release is routed elsewhere would                         \
-         * leave this set for good, and the next unrelated release to reach                        \
-         * this instance would be swallowed - the stuck button the record                          \
-         * exists to prevent. A layer change is the moment that split becomes                      \
-         * possible, so clear it here rather than expiring it on a timer.                          \
-         */                                                                                        \
-        data->btn0_press_suppressed = false;                                                       \
+        atomic_inc(&data->reset_generation);                                                       \
     }
 
 static int absolute_to_relative_layer_listener(const zmk_event_t *eh) {
