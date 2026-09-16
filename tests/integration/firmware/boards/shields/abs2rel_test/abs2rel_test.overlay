@@ -42,6 +42,13 @@
                   INPUT_EV_ABS INPUT_ABS_Y 100 1>;
     };
 
+    abs2rel_source_right: abs2rel_source_right {
+        compatible = "zmk,input-mock";
+        event-period = <100>;
+        events = <INPUT_EV_ABS INPUT_ABS_X 900 0
+                  INPUT_EV_ABS INPUT_ABS_Y 900 1>;
+    };
+
     /* Deliberately omit suppress-btn-touch to compile-test its true default. */
     abs2rel_default: a2r_default {
         compatible = "zmk,input-processor-absolute-to-relative";
@@ -51,6 +58,13 @@
     abs2rel_listener {
         compatible = "zmk,input-listener";
         device = <&abs2rel_source>;
+        input-processors = <&abs2rel_default>;
+    };
+
+    /* Compile-test two listener indexes sharing one stateful processor node. */
+    abs2rel_listener_right {
+        compatible = "zmk,input-listener";
+        device = <&abs2rel_source_right>;
         input-processors = <&abs2rel_default>;
     };
 };
