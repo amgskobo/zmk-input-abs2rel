@@ -25,19 +25,4 @@
         suppress-btn0;
     };
 
-    /* Independent state for a pointing device proxied from the right half. */
-    zip_absolute_to_relative_right: abs_rel_r {
-        status = "okay";
-        compatible = "zmk,input-processor-absolute-to-relative";
-        #input-processor-cells = <0>;
-        suppress-btn-touch;
-    };
-
-    zip_absolute_to_relative_scroll_right: abs_rel_scr_r {
-        status = "okay";
-        compatible = "zmk,input-processor-absolute-to-relative";
-        #input-processor-cells = <0>;
-        suppress-btn-touch;
-        suppress-btn0;
-    };
 };

@@ -54,8 +54,8 @@ else
     strings "$work_dir/build/zephyr/zmk.elf" >"$work_dir/build/zephyr/strings.txt"
     grep -Fxq amgskobo__a2r "$work_dir/build/zephyr/strings.txt"
     grep -Fxq a2r_default.suppress_btn_touch "$work_dir/build/zephyr/strings.txt"
-    grep -Fxq abs_rel_r.suppress_btn_touch "$work_dir/build/zephyr/strings.txt"
-    grep -Fxq abs_rel_scr_r.suppress_btn0 "$work_dir/build/zephyr/strings.txt"
+    grep -Fxq abs_rel.suppress_btn_touch "$work_dir/build/zephyr/strings.txt"
+    grep -Fxq abs_rel_scroll.suppress_btn0 "$work_dir/build/zephyr/strings.txt"
 fi
 
 echo "$variant ZMK firmware fixture: PASS"

@@ -25,14 +25,15 @@ LOG_MODULE_REGISTER(absolute_to_relative, CONFIG_ZMK_LOG_LEVEL);
 #define COORD_INVALID_ZERO 0xFFF
 #define SUPPRESS_BTN_TOUCH_BIT 0
 #define SUPPRESS_BTN0_BIT 1
+#define ABSOLUTE_TO_RELATIVE_LISTENER_COUNT DT_NUM_INST_STATUS_OKAY(zmk_input_listener)
+#define ABSOLUTE_TO_RELATIVE_STREAM_COUNT MAX(ABSOLUTE_TO_RELATIVE_LISTENER_COUNT, 1)
 
 /* The devicetree values, which seed the live ones in data at init. */
 struct absolute_to_relative_config {
     struct absolute_to_relative_suppression suppression;
 };
 
-struct absolute_to_relative_data {
-    /* Written only by the input thread; layer callbacks change the generation. */
+struct absolute_to_relative_stream {
     struct absolute_to_relative_axis_state x;
     struct absolute_to_relative_axis_state y;
     /*
@@ -44,14 +45,20 @@ struct absolute_to_relative_data {
      * held down on the host with nothing left to release it.
      */
     bool btn0_press_suppressed;
+    atomic_val_t applied_generation;
+};
+
+struct absolute_to_relative_data {
+    /* Each listener keeps an independent coordinate and button history. */
+    struct absolute_to_relative_stream streams[ABSOLUTE_TO_RELATIVE_STREAM_COUNT];
     /*
      * A layer callback can run outside the input thread. It only increments
-     * this atomic generation; the input thread remains the sole writer of all
-     * conversion state. If the generation moves during an event, that event is
-     * discarded and the new generation starts from a clean reference.
+     * this shared atomic generation; the input thread remains the sole writer
+     * of every stream. Each stream applies a new generation when it next sees
+     * an event. If the generation moves during an event, that event is
+     * discarded and its stream starts from a clean reference.
      */
     atomic_t reset_generation;
-    atomic_val_t applied_generation;
     /* Runtime settings callbacks and input handling may run in different contexts. */
     atomic_t suppression_flags;
 };
@@ -105,16 +112,32 @@ int absolute_to_relative_set_suppression(const struct device *dev,
  * Drop the reference point, so the next sample on each axis establishes a new
  * one instead of being measured against a position that no longer relates to it.
  */
-static inline void drop_reference(struct absolute_to_relative_data *data) {
-    absolute_to_relative_axis_reset(&data->x);
-    absolute_to_relative_axis_reset(&data->y);
+static inline void drop_reference(struct absolute_to_relative_stream *stream) {
+    absolute_to_relative_axis_reset(&stream->x);
+    absolute_to_relative_axis_reset(&stream->y);
 }
 
-static inline void apply_generation(struct absolute_to_relative_data *data,
+static inline void apply_generation(struct absolute_to_relative_stream *stream,
                                     atomic_val_t generation) {
-    drop_reference(data);
-    data->btn0_press_suppressed = false;
-    data->applied_generation = generation;
+    drop_reference(stream);
+    stream->btn0_press_suppressed = false;
+    stream->applied_generation = generation;
+}
+
+static inline struct absolute_to_relative_stream *
+stream_for_event(struct absolute_to_relative_data *data,
+                 const struct zmk_input_processor_state *state) {
+    if (state == NULL) {
+        return &data->streams[0];
+    }
+
+    if (state->input_device_index >= ABSOLUTE_TO_RELATIVE_STREAM_COUNT) {
+        LOG_ERR("Input device index %u exceeds the %u allocated abs2rel streams",
+                state->input_device_index, ABSOLUTE_TO_RELATIVE_STREAM_COUNT);
+        return NULL;
+    }
+
+    return &data->streams[state->input_device_index];
 }
 
 /**
@@ -176,8 +199,9 @@ static inline bool process_axis(struct input_event *event,
  * the previous contact; skipping the reset in that case would measure the new
  * contact against the old one's position.
  */
-static int handle_touch_button(struct input_event *event, struct absolute_to_relative_data *data) {
-    drop_reference(data);
+static int handle_touch_button(struct input_event *event, struct absolute_to_relative_data *data,
+                               struct absolute_to_relative_stream *stream) {
+    drop_reference(stream);
 
     if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
         LOG_DBG("Touch %s - reference dropped", event->value ? "started" : "released");
@@ -209,16 +233,17 @@ static int handle_touch_button(struct input_event *event, struct absolute_to_rel
  * never be left stuck down.
  */
 static int handle_button_suppress(struct input_event *event,
-                                  struct absolute_to_relative_data *data) {
+                                  struct absolute_to_relative_data *data,
+                                  struct absolute_to_relative_stream *stream) {
     if (!(atomic_get(&data->suppression_flags) & BIT(SUPPRESS_BTN0_BIT))) {
         /* Not suppressing here, so nothing of ours is outstanding. */
-        data->btn0_press_suppressed = false;
+        stream->btn0_press_suppressed = false;
         return ZMK_INPUT_PROC_CONTINUE;
     }
 
-    bool was_suppressed = data->btn0_press_suppressed;
+    bool was_suppressed = stream->btn0_press_suppressed;
 
-    data->btn0_press_suppressed = event->value != 0;
+    stream->btn0_press_suppressed = event->value != 0;
 
     if (!event->value && !was_suppressed) {
         LOG_WRN("Passing BTN_0 release: its press was not suppressed here");
@@ -241,13 +266,16 @@ static int absolute_to_relative_handle_event(const struct device *dev, struct in
                                              struct zmk_input_processor_state *state) {
     ARG_UNUSED(param1);
     ARG_UNUSED(param2);
-    ARG_UNUSED(state);
 
     struct absolute_to_relative_data *data = (struct absolute_to_relative_data *)dev->data;
+    struct absolute_to_relative_stream *stream = stream_for_event(data, state);
+    if (stream == NULL) {
+        return ZMK_INPUT_PROC_CONTINUE;
+    }
     atomic_val_t generation_before = atomic_get(&data->reset_generation);
 
-    if (generation_before != data->applied_generation) {
-        apply_generation(data, generation_before);
+    if (generation_before != stream->applied_generation) {
+        apply_generation(stream, generation_before);
     }
 
     int result = ZMK_INPUT_PROC_CONTINUE;
@@ -255,9 +283,9 @@ static int absolute_to_relative_handle_event(const struct device *dev, struct in
     /* Handle button events */
     if (event->type == INPUT_EV_KEY) {
         if (event->code == INPUT_BTN_TOUCH) {
-            result = handle_touch_button(event, data);
+            result = handle_touch_button(event, data, stream);
         } else if (event->code == INPUT_BTN_0) {
-            result = handle_button_suppress(event, data);
+            result = handle_button_suppress(event, data, stream);
         }
     } else if (event->type == INPUT_EV_ABS) {
         /*
@@ -277,17 +305,17 @@ static int absolute_to_relative_handle_event(const struct device *dev, struct in
          * one converts. That is the same sample every contact spends at its start.
          */
         if (event->code == INPUT_ABS_X) {
-            result = process_axis(event, &data->x, INPUT_REL_X) ? ZMK_INPUT_PROC_STOP
-                                                                : ZMK_INPUT_PROC_CONTINUE;
+            result = process_axis(event, &stream->x, INPUT_REL_X) ? ZMK_INPUT_PROC_STOP
+                                                                  : ZMK_INPUT_PROC_CONTINUE;
         } else if (event->code == INPUT_ABS_Y) {
-            result = process_axis(event, &data->y, INPUT_REL_Y) ? ZMK_INPUT_PROC_STOP
-                                                                : ZMK_INPUT_PROC_CONTINUE;
+            result = process_axis(event, &stream->y, INPUT_REL_Y) ? ZMK_INPUT_PROC_STOP
+                                                                  : ZMK_INPUT_PROC_CONTINUE;
         }
     }
 
     atomic_val_t generation_after = atomic_get(&data->reset_generation);
     if (generation_after != generation_before) {
-        apply_generation(data, generation_after);
+        apply_generation(stream, generation_after);
         event->code = COORD_INVALID_ZERO;
         event->sync = false;
         return ZMK_INPUT_PROC_STOP;
@@ -303,11 +331,13 @@ static int absolute_to_relative_init(const struct device *dev) {
     struct absolute_to_relative_data *data = (struct absolute_to_relative_data *)dev->data;
     const struct absolute_to_relative_config *config = dev->config;
 
-    data->btn0_press_suppressed = false;
     atomic_set(&data->suppression_flags, encode_suppression(&config->suppression));
     atomic_set(&data->reset_generation, 0);
-    data->applied_generation = 0;
-    drop_reference(data);
+    for (size_t i = 0U; i < ABSOLUTE_TO_RELATIVE_STREAM_COUNT; i++) {
+        data->streams[i].btn0_press_suppressed = false;
+        data->streams[i].applied_generation = 0;
+        drop_reference(&data->streams[i]);
+    }
 
     LOG_INF("Initialized (suppress_btn_touch=%d, suppress_btn0=%d)", config->suppression.btn_touch,
             config->suppression.btn0);

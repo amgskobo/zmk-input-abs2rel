@@ -43,8 +43,8 @@ module の標準 node を使う場合は DTS を include します。
 };
 ```
 
-独立した入力streamごとに変換履歴を分ける場合や、node 名を自分で決める場合は、
-互換性名を指定して node を宣言できます。
+異なるボタン抑止方針が必要な場合や、node 名を自分で決める場合は、互換性名を指定して
+node を宣言できます。
 
 ```dts
 pointer_abs_rel: pointer_abs_rel {
@@ -63,21 +63,22 @@ Devicetreeのboolean propertyは、propertyが存在することで`true`を表�
 
 ### 標準 node
 
-module は local / right それぞれに pointer 用と scroll 用の計 4 node を提供します。
+module は pointer 用と scroll 用の計 2 node を提供します。各nodeはZMKの
+input listenerごとに独立した変換状態を持つため、local deviceとsplit proxy deviceで
+同じnodeを安全に共有できます。
 
 | 参照 label | 実 node 名 | ボタン処理 |
 | :--- | :--- | :--- |
 | `zip_absolute_to_relative` | `abs_rel` | `BTN_TOUCH` を抑止し、`BTN_0` のクリックは通す |
 | `zip_absolute_to_relative_scroll` | `abs_rel_scroll` | scroll 用。`BTN_TOUCH` と `BTN_0` の両方を抑止 |
-| `zip_absolute_to_relative_right` | `abs_rel_r` | 右側入力用の独立したpointer状態 |
-| `zip_absolute_to_relative_scroll_right` | `abs_rel_scr_r` | 右側入力用の独立したscroll状態 |
 
 通常 pointer は前者、クリックをホストへ送らない scroll 経路は後者を使います。
 
-変換状態はprocessor nodeに属します。独立して使用できる2台のdeviceを同じnodeへ
-接続しないでください。基準座標と平滑化履歴が共有されるためです。左右分割keyboardで
-localとproxyのtrackpadを分離できるよう、標準の右側用nodeを用意しています。3台以上の
-入力には、短い固有名を持つnodeを追加してください。
+変換状態はprocessor nodeと`input_device_index`の組に属します。ZMKからinput listenerの
+instance indexが渡されるため、同じnodeを使う複数listenerでも、基準座標、平滑化履歴、
+抑止済みbuttonの記録は分離されます。runtime設定はnodeに属し、そのnodeを使うlistenerで
+共有されます。異なるボタン方針または個別の設定項目が必要な場合だけ、短い固有名を持つ
+nodeを追加してください。
 
 ### 設定プロパティ
 
@@ -112,14 +113,15 @@ smooth = (current_delta + previous_delta) / 2
 
 ### 基準点と layer 変更
 
-`BTN_TOUCH` の press / release と layer 変更時に基準点を破棄します。layer により
-input processor chain が変わる途中で古い基準点を残すと、別の接触との距離を移動量と
-して扱い、ポインターが跳ぶ原因になるためです。
+基準点はinput listenerごとに独立しています。`BTN_TOUCH` の press / releaseでは、その
+listenerの基準点だけを破棄します。layer変更時は全listenerの基準点を無効化します。
+layer によりinput processor chain が変わる途中で古い基準点を残すと、別の接触との距離を
+移動量として扱い、ポインターが跳ぶ原因になるためです。
 
-layer変更callbackは変換状態を直接変更せず、atomic generation counterだけを進めます。
-input threadはevent処理の前後でgenerationを比較し、途中で変わったeventを破棄してから
-新しい基準点を作ります。これによりlayer callbackと座標変換が同じ状態へ同時に書き込む
-ことを避けます。
+layer変更callbackは変換状態を直接変更せず、共有atomic generation counterだけを進めます。
+各listenerのstreamは次のeventで新しいgenerationを適用します。input threadはevent処理の
+前後でもgenerationを比較し、途中で変わったeventを破棄してから新しい基準点を作ります。
+これによりlayer callbackと座標変換が同じ状態へ同時に書き込むことを避けます。
 
 ### 座標範囲
 
@@ -139,8 +141,6 @@ Zephyr `input_event.value` のsigned `int32_t` 全域を保持します。2座�
 ```text
 abs_rel.suppress_btn_touch
 abs_rel_scroll.suppress_btn0
-abs_rel_r.suppress_btn_touch
-abs_rel_scr_r.suppress_btn0
 ```
 
 ### 名前の長さ制限

@@ -47,9 +47,8 @@ manifest:
 };
 ```
 
-Or declare the node yourself when another independent input stream needs its
-own conversion history, or when the name matters — it is the settings key (see
-below):
+Or declare the node yourself when another suppression policy is needed, or
+when the name matters — it is the settings key (see below):
 
 ```dts
 pointer_abs_rel: pointer_abs_rel {
@@ -67,20 +66,21 @@ carry a `false` value. Therefore a build without runtime custom settings always
 suppresses `BTN_TOUCH`. Enable the custom-settings option below when the flag
 must be switchable to `false`.
 
-The module supplies four standard nodes:
+The module supplies two standard nodes. Each node keeps independent conversion
+state for every ZMK input listener, so local and split-proxied devices can share
+the same reference safely:
 
 | Reference | Node name | Button handling |
 | :--- | :--- | :--- |
 | `zip_absolute_to_relative` | `abs_rel` | suppresses `BTN_TOUCH`; preserves `BTN_0` clicks |
 | `zip_absolute_to_relative_scroll` | `abs_rel_scroll` | suppresses both `BTN_TOUCH` and `BTN_0` for scrolling |
-| `zip_absolute_to_relative_right` | `abs_rel_r` | independent pointer state for a right-side input |
-| `zip_absolute_to_relative_scroll_right` | `abs_rel_scr_r` | independent scroll state for a right-side input |
 
-State belongs to a processor node. Do not route two independent or concurrently
-usable devices through the same node: their reference positions and smoothing
-history would be shared. The two `*_right` nodes exist so a common two-half
-keyboard can give its local and proxied trackpads separate state. Declare more
-short-named instances for more sources.
+State belongs to the pair of processor node and `input_device_index`. ZMK passes
+the input listener's instance index, so two listeners using the same node keep
+separate reference positions, smoothing history and suppressed-button records.
+Settings still belong to the node and are shared by those listeners. Declare an
+additional short-named instance only when a different button policy or a
+separately adjustable settings entry is required.
 
 ### Configuration Reference
 
@@ -114,11 +114,12 @@ same path measure longer travelled one way than the other. The first sample on
 each axis establishes the reference point and produces no event; smoothing
 begins on the second.
 
-**Reference point**: `BTN_TOUCH` drops it on both edges, and so does a layer
-change. Absolute events are converted whenever they arrive, without checking
-whether a contact is believed active — an instance only sees the part of a
-contact during which it holds the chain, so believing otherwise would silence
-it for the rest of a contact that began elsewhere.
+**Reference point**: each input listener has its own. `BTN_TOUCH` drops only
+that listener's reference on both edges, while a layer change invalidates all
+listeners. Absolute events are converted whenever they arrive, without
+checking whether a contact is believed active — a processor route only sees
+the part of a contact during which it holds the chain, so believing otherwise
+would silence it for the rest of a contact that began elsewhere.
 
 **Layer changes**: which processors run is decided per event, from the layer
 active at that moment, so one contact can be split across two chains. The
@@ -126,11 +127,11 @@ instance a contact moves to would otherwise still hold a reference point from
 an earlier touch, and turn its first sample into the distance between two
 unrelated contacts — a jump across the pad from a single count of real motion.
 So `zmk_layer_state_changed` is subscribed directly and invalidates every
-reference. The callback only increments an atomic generation. The input thread
-applies that generation itself; if it changes while an event is being
-processed, that event is discarded and the new generation starts clean. The
-layer callback and coordinate conversion therefore never write the same state
-concurrently.
+reference. The callback only increments one shared atomic generation. Each
+listener stream applies that generation when it next receives an event; if it
+changes while an event is being processed, that event is discarded and the
+stream starts clean. The layer callback and coordinate conversion therefore
+never write the same state concurrently.
 
 **Value range**: the conversion core preserves the full signed `int32_t` range
 used by Zephyr input events. Differences wider than that range are saturated
@@ -154,8 +155,6 @@ A key is the owning node's devicetree name, then the field:
 ```
 abs_rel.suppress_btn_touch
 abs_rel_scroll.suppress_btn0
-abs_rel_r.suppress_btn_touch
-abs_rel_scr_r.suppress_btn0
 ```
 
 The node name is the one identifier both halves of the problem already hold: a
@@ -214,10 +213,11 @@ the full `int32_t` coordinate range and independent streams.
 GitHub Actions also builds `tests/integration` against both upstream ZMK with
 custom settings disabled and the DYA fork with custom settings enabled. The
 fixtures exercise the module metadata, Kconfig, Devicetree binding, CMake
-integration and the omitted `suppress-btn-touch` property on a real firmware
-target. The DYA build additionally verifies that the subsystem and representative
-settings keys are linked into the firmware. All checks run for every push and
-pull request and may be started manually.
+integration, two listeners sharing one processor, and the omitted
+`suppress-btn-touch` property on a real firmware target. The DYA build
+additionally verifies that the subsystem and representative settings keys are
+linked into the firmware. All checks run for every push and pull request and
+may be started manually.
 
 ## License
 
