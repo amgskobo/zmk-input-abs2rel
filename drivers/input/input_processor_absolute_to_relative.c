@@ -127,13 +127,17 @@ static inline void apply_generation(struct absolute_to_relative_stream *stream,
 static inline struct absolute_to_relative_stream *
 stream_for_event(struct absolute_to_relative_data *data,
                  const struct zmk_input_processor_state *state) {
-    size_t index = 0U;
-
-    if (state != NULL && state->input_device_index < ABSOLUTE_TO_RELATIVE_STREAM_COUNT) {
-        index = state->input_device_index;
+    if (state == NULL) {
+        return &data->streams[0];
     }
 
-    return &data->streams[index];
+    if (state->input_device_index >= ABSOLUTE_TO_RELATIVE_STREAM_COUNT) {
+        LOG_ERR("Input device index %u exceeds the %u allocated abs2rel streams",
+                state->input_device_index, ABSOLUTE_TO_RELATIVE_STREAM_COUNT);
+        return NULL;
+    }
+
+    return &data->streams[state->input_device_index];
 }
 
 /**
@@ -265,6 +269,9 @@ static int absolute_to_relative_handle_event(const struct device *dev, struct in
 
     struct absolute_to_relative_data *data = (struct absolute_to_relative_data *)dev->data;
     struct absolute_to_relative_stream *stream = stream_for_event(data, state);
+    if (stream == NULL) {
+        return ZMK_INPUT_PROC_CONTINUE;
+    }
     atomic_val_t generation_before = atomic_get(&data->reset_generation);
 
     if (generation_before != stream->applied_generation) {
