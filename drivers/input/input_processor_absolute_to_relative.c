@@ -76,38 +76,6 @@ static atomic_val_t encode_suppression(const struct absolute_to_relative_suppres
     return flags;
 }
 
-int absolute_to_relative_get_suppression(const struct device *dev,
-                                         struct absolute_to_relative_suppression *out) {
-    if (dev == NULL || out == NULL) {
-        return -EINVAL;
-    }
-
-    const struct absolute_to_relative_data *data = dev->data;
-    atomic_val_t flags = atomic_get(&data->suppression_flags);
-
-    *out = (struct absolute_to_relative_suppression){
-        .btn_touch = (flags & BIT(SUPPRESS_BTN_TOUCH_BIT)) != 0,
-        .btn0 = (flags & BIT(SUPPRESS_BTN0_BIT)) != 0,
-    };
-
-    return 0;
-}
-
-int absolute_to_relative_set_suppression(const struct device *dev,
-                                         const struct absolute_to_relative_suppression *flags) {
-    if (dev == NULL || flags == NULL) {
-        return -EINVAL;
-    }
-
-    struct absolute_to_relative_data *data = dev->data;
-
-    atomic_set(&data->suppression_flags, encode_suppression(flags));
-
-    LOG_DBG("%s: suppress btn_touch %d, btn0 %d", dev->name, flags->btn_touch, flags->btn0);
-
-    return 0;
-}
-
 /**
  * Drop the reference point, so the next sample on each axis establishes a new
  * one instead of being measured against a position that no longer relates to it.
@@ -132,8 +100,6 @@ stream_for_event(struct absolute_to_relative_data *data,
     }
 
     if (state->input_device_index >= ABSOLUTE_TO_RELATIVE_STREAM_COUNT) {
-        LOG_ERR("Input device index %u exceeds the %u allocated abs2rel streams",
-                state->input_device_index, ABSOLUTE_TO_RELATIVE_STREAM_COUNT);
         return NULL;
     }
 
@@ -370,6 +336,59 @@ static const struct zmk_input_processor_driver_api absolute_to_relative_driver_a
                           CONFIG_KERNEL_INIT_PRIORITY_DEFAULT, &absolute_to_relative_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(ABSOLUTE_TO_RELATIVE_INST)
+
+#define ABSOLUTE_TO_RELATIVE_DEVICE_REF(n) DEVICE_DT_INST_GET(n),
+
+static const struct device *const absolute_to_relative_devices[] = {
+    DT_INST_FOREACH_STATUS_OKAY(ABSOLUTE_TO_RELATIVE_DEVICE_REF)};
+
+static bool absolute_to_relative_device_valid(const struct device *dev) {
+    for (size_t i = 0U; i < ARRAY_SIZE(absolute_to_relative_devices); i++) {
+        if (absolute_to_relative_devices[i] == dev) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+int absolute_to_relative_get_suppression(const struct device *dev,
+                                         struct absolute_to_relative_suppression *out) {
+    if (dev == NULL || out == NULL) {
+        return -EINVAL;
+    }
+    if (!absolute_to_relative_device_valid(dev)) {
+        return -ENODEV;
+    }
+
+    const struct absolute_to_relative_data *data = dev->data;
+    atomic_val_t flags = atomic_get(&data->suppression_flags);
+
+    *out = (struct absolute_to_relative_suppression){
+        .btn_touch = (flags & BIT(SUPPRESS_BTN_TOUCH_BIT)) != 0,
+        .btn0 = (flags & BIT(SUPPRESS_BTN0_BIT)) != 0,
+    };
+
+    return 0;
+}
+
+int absolute_to_relative_set_suppression(const struct device *dev,
+                                         const struct absolute_to_relative_suppression *flags) {
+    if (dev == NULL || flags == NULL) {
+        return -EINVAL;
+    }
+    if (!absolute_to_relative_device_valid(dev)) {
+        return -ENODEV;
+    }
+
+    struct absolute_to_relative_data *data = dev->data;
+
+    atomic_set(&data->suppression_flags, encode_suppression(flags));
+
+    LOG_DBG("%s: suppress btn_touch %d, btn0 %d", dev->name, flags->btn_touch, flags->btn0);
+
+    return 0;
+}
 
 /**
  * Drop the reference point when the layer changes.
