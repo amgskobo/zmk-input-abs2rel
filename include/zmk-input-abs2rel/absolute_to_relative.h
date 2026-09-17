@@ -24,7 +24,10 @@ struct absolute_to_relative_suppression {
     bool btn0;
 };
 
-/* Reads the flags the processor is applying right now. */
+/*
+ * Reads the flags the processor is applying right now. Returns -ENODEV when
+ * dev is not an absolute-to-relative processor instance.
+ */
 int absolute_to_relative_get_suppression(const struct device *dev,
                                          struct absolute_to_relative_suppression *out);
 
@@ -38,6 +41,7 @@ int absolute_to_relative_get_suppression(const struct device *dev,
  *
  * Nothing is persisted here; that is the settings layer's job, which is what
  * keeps this driver free of a second owner for the same value.
+ * Returns -ENODEV when dev is not an absolute-to-relative processor instance.
  */
 int absolute_to_relative_set_suppression(const struct device *dev,
                                          const struct absolute_to_relative_suppression *flags);
