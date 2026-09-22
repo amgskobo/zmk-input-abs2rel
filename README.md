@@ -10,11 +10,11 @@ feeding a pointer stack that wants to know how far it *moved*.
 
 ## Why this is its own module
 
-It is an original, not a replacement. ZMK ships five input processors — scaler,
-transform, code-mapper, temp-layer, behaviors — and
-[zmk-input-processors](https://github.com/amgskobo/zmk-input-processors) is
-runtime-configurable versions of those, each named `runtime-*` so a chain shows
-at a glance which stages can be changed while the keyboard runs.
+It is an original, not a replacement. ZMK ships its own input processors —
+scaler, transform, code-mapper, temp-layer and others — and
+[zmk-input-processors](https://github.com/amgskobo/zmk-input-processors) holds
+runtime-configurable versions of four of them, each named `runtime-*` so a chain
+shows at a glance which stages can be changed while the keyboard runs.
 
 This has no upstream counterpart, so the prefix would say nothing about it, and
 it kept its plain name as a documented exception. That exception was the
@@ -66,6 +66,8 @@ carry a `false` value. Therefore a build without runtime custom settings always
 suppresses `BTN_TOUCH`. Enable the custom-settings option below when the flag
 must be switchable to `false`.
 
+### Standard nodes
+
 The module supplies two standard nodes. Each node keeps independent conversion
 state for every ZMK input listener, so local and split-proxied devices can share
 the same reference safely:
@@ -103,45 +105,54 @@ to send it, leaving mouse button 0 held at the host.
 
 Turning `suppress-btn0` off does not release a press already swallowed: that
 press's release still passes through, for the same reason it does across a
-layer change.
+layer change. `suppress-btn0` never drops a `BTN_0` release whose press was not
+suppressed here. Passing a release through is always safe — the press it belongs
+to already reached the host — while dropping one would leave the button held
+down with nothing left to release it. That record is cleared on a layer change
+too.
 
 ## How it works
 
-**Smoothing**: movement is smoothed by averaging the current delta with the
-previous one: `smooth = (current + previous) / 2`. The halving divides rather
-than shifts, because a shift rounds towards minus infinity and would make the
-same path measure longer travelled one way than the other. The first sample on
-each axis establishes the reference point and produces no event; smoothing
-begins on the second.
+### Smoothing
 
-**Reference point**: each input listener has its own. `BTN_TOUCH` drops only
-that listener's reference on both edges, while a layer change invalidates all
-listeners. Absolute events are converted whenever they arrive, without
-checking whether a contact is believed active — a processor route only sees
-the part of a contact during which it holds the chain, so believing otherwise
-would silence it for the rest of a contact that began elsewhere.
+Movement is smoothed by averaging the current delta with the previous one:
 
-**Layer changes**: which processors run is decided per event, from the layer
-active at that moment, so one contact can be split across two chains. The
-instance a contact moves to would otherwise still hold a reference point from
-an earlier touch, and turn its first sample into the distance between two
-unrelated contacts — a jump across the pad from a single count of real motion.
-So `zmk_layer_state_changed` is subscribed directly and invalidates every
-reference. The callback only increments one shared atomic generation. Each
-listener stream applies that generation when it next receives an event; if it
-changes while an event is being processed, that event is discarded and the
-stream starts clean. The layer callback and coordinate conversion therefore
-never write the same state concurrently.
+```text
+smooth = (current_delta + previous_delta) / 2
+```
 
-**Value range**: the conversion core preserves the full signed `int32_t` range
-used by Zephyr input events. Differences wider than that range are saturated
-before smoothing instead of wrapping. The output remains an `int32_t` relative
-event for the processors and listener downstream.
+The halving divides rather than shifts, because a shift rounds towards minus
+infinity and would make the same path measure longer travelled one way than the
+other. The first sample on each axis establishes the reference point and
+produces no event; smoothing begins on the second.
 
-`suppress-btn0` never drops a `BTN_0` release whose press was not suppressed
-here. Passing a release through is always safe — the press it belongs to
-already reached the host — while dropping one would leave the button held down
-with nothing left to release it. That record is cleared on a layer change too.
+### Reference point and layer changes
+
+Each input listener has its own reference point. `BTN_TOUCH` drops only that
+listener's reference on both edges, while a layer change invalidates all
+listeners. Absolute events are converted whenever they arrive, without checking
+whether a contact is believed active — a processor route only sees the part of a
+contact during which it holds the chain, so believing otherwise would silence it
+for the rest of a contact that began elsewhere.
+
+Which processors run is decided per event, from the layer active at that moment,
+so one contact can be split across two chains. The instance a contact moves to
+would otherwise still hold a reference point from an earlier touch, and turn its
+first sample into the distance between two unrelated contacts — a jump across
+the pad from a single count of real motion. So `zmk_layer_state_changed` is
+subscribed directly and invalidates every reference. The callback only
+increments one shared atomic generation. Each listener stream applies that
+generation when it next receives an event; if it changes while an event is being
+processed, that event is discarded and the stream starts clean. The layer
+callback and coordinate conversion therefore never write the same state
+concurrently.
+
+### Value range
+
+The conversion core preserves the full signed `int32_t` range used by Zephyr
+input events. Differences wider than that range are saturated before smoothing
+instead of wrapping. The output remains an `int32_t` relative event for the
+processors and listener downstream.
 
 ## Changing the flags at runtime
 
@@ -163,6 +174,8 @@ gets a `const struct device *` per stage, whose `->name` is `DEVICE_DT_NAME()`,
 which is `DT_NODE_FULL_NAME()` — the same string the key is built from. So a
 stage's settings are exactly the keys starting with its device name, with
 nothing registered, agreed between modules, or typed into devicetree.
+
+### Name length limit
 
 The longest field is `suppress_btn_touch` at 18 characters. Its complete
 persisted name leaves the node **14 characters**: the 48-byte RPC key limit is
@@ -216,8 +229,8 @@ fixtures exercise the module metadata, Kconfig, Devicetree binding, CMake
 integration, two listeners sharing one processor, and the omitted
 `suppress-btn-touch` property on a real firmware target. The DYA build
 additionally verifies that the subsystem and representative settings keys are
-linked into the firmware. All checks run for every push and pull request and
-may be started manually.
+linked into the firmware. All checks run for every pull request and for pushes
+to `main`, and may be started manually.
 
 ## License
 

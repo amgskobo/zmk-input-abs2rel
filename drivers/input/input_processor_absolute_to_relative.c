@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2024 The ZMK Contributors
+ * Copyright (c) 2026 amgskobo
  *
  * SPDX-License-Identifier: MIT
  */
@@ -212,7 +212,8 @@ static int handle_button_suppress(struct input_event *event,
     stream->btn0_press_suppressed = event->value != 0;
 
     if (!event->value && !was_suppressed) {
-        LOG_WRN("Passing BTN_0 release: its press was not suppressed here");
+        /* A route change between the press and its release, which is routine. */
+        LOG_DBG("Passing BTN_0 release: its press was not suppressed here");
         return ZMK_INPUT_PROC_CONTINUE;
     }
 

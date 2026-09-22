@@ -1,4 +1,4 @@
-# Copyright (c) 2024 The ZMK Contributors
+# Copyright (c) 2026 amgskobo
 # SPDX-License-Identifier: MIT
 
 description: Converts absolute pointer coordinates into relative motion, smoothed over two samples
