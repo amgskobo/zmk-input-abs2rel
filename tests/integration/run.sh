@@ -53,9 +53,14 @@ else
         "$work_dir/build/zephyr/.config"
     strings "$work_dir/build/zephyr/zmk.elf" >"$work_dir/build/zephyr/strings.txt"
     grep -Fxq amgskobo__a2r "$work_dir/build/zephyr/strings.txt"
-    grep -Fxq a2r_default.suppress_btn_touch "$work_dir/build/zephyr/strings.txt"
-    grep -Fxq abs_rel.suppress_btn_touch "$work_dir/build/zephyr/strings.txt"
-    grep -Fxq abs_rel_scroll.suppress_btn0 "$work_dir/build/zephyr/strings.txt"
+    for instance in a2r_default abs_rel abs_rel_scroll; do
+        for field in suppress_btn_touch suppress_btn0; do
+            grep -Fxq "$instance.$field" "$work_dir/build/zephyr/strings.txt" || {
+                echo "missing Studio setting: $instance.$field" >&2
+                exit 1
+            }
+        done
+    done
 fi
 
 echo "$variant ZMK firmware fixture: PASS"
