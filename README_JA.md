@@ -211,8 +211,9 @@ ZMK でもビルド・動作します。
 ## テスト
 
 `tests/run.sh` は、製品と同じ変換 core を厳しい警告設定でコンパイルし、最適化
-ビルドと AddressSanitizer/UndefinedBehaviorSanitizer ビルドで実行します。最初の
-サンプルによる基準点の設定、リセット、負方向の対称な丸め、`int32_t` の座標全範囲、
+ビルド、AddressSanitizer/UndefinedBehaviorSanitizer ビルド、カバレッジ計測で実行します。
+CI は純粋な変換 core の行・分岐 100% を要求します。Zephyr 側 module 全体の値ではありません。
+最初のサンプルによる基準点の設定、リセット、負方向の対称な丸め、`int32_t` の座標全範囲、
 stream の独立性を確認します。
 
 GitHub Actions では、custom settings を無効にした upstream ZMK と、有効にした DYA
