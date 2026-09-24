@@ -212,7 +212,9 @@ ZMK でもビルド・動作します。
 
 `tests/run.sh` は、製品と同じ変換 core を厳しい警告設定でコンパイルし、最適化
 ビルド、AddressSanitizer/UndefinedBehaviorSanitizer ビルド、カバレッジ計測で実行します。
-CI は純粋な変換 core の行・分岐 100% を要求します。Zephyr 側 module 全体の値ではありません。
+同じコマンドで製品ドライバのイベント処理、世代切替、初期化、設定APIの13関数も抽出して
+host stub 上で実行します。CI は純粋な変換 core と抽出した driver 関数のそれぞれに
+行・分岐 100% を要求します。Zephyr 側 module 全体の値ではありません。
 最初のサンプルによる基準点の設定、リセット、負方向の対称な丸め、`int32_t` の座標全範囲、
 stream の独立性を確認します。
 

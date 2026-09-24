@@ -220,8 +220,10 @@ it — it builds and runs on upstream ZMK with no other module present.
 
 `tests/run.sh` compiles the production conversion core with strict warnings,
 then runs it in optimized and AddressSanitizer/UndefinedBehaviorSanitizer
-builds plus a coverage build. CI requires 100% line and branch coverage of the
-pure conversion core, not of the whole Zephyr module. It covers first-sample
+builds plus a coverage build. The same command also extracts and runs 13 actual
+driver event, generation, initialization, and settings functions with host
+stubs. CI requires 100% line and branch coverage of both the pure conversion
+core and those extracted driver functions, not of the whole Zephyr module. It covers first-sample
 seeding, reset, symmetric negative rounding,
 the full `int32_t` coordinate range and independent streams.
 
