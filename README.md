@@ -220,7 +220,9 @@ it — it builds and runs on upstream ZMK with no other module present.
 
 `tests/run.sh` compiles the production conversion core with strict warnings,
 then runs it in optimized and AddressSanitizer/UndefinedBehaviorSanitizer
-builds. It covers first-sample seeding, reset, symmetric negative rounding,
+builds plus a coverage build. CI requires 100% line and branch coverage of the
+pure conversion core, not of the whole Zephyr module. It covers first-sample
+seeding, reset, symmetric negative rounding,
 the full `int32_t` coordinate range and independent streams.
 
 GitHub Actions also builds `tests/integration` against both upstream ZMK with

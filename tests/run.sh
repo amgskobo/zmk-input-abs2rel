@@ -21,6 +21,7 @@ cc "${warnings[@]}" -fsyntax-only -I"$repo_root/include" "$build_dir/header.c"
 variants=(
     "optimised:-O2"
     "sanitized:-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all"
+    "coverage:-O0 --coverage"
 )
 
 export ASAN_OPTIONS=detect_leaks=0
@@ -34,3 +35,9 @@ for variant in "${variants[@]}"; do
         -o "$build_dir/test-$label"
     "$build_dir/test-$label"
 done
+
+coverage=$(cd "$build_dir" && gcov -b -c *coverage*.gcno)
+printf '%s\n' "$coverage"
+core=$(printf '%s\n' "$coverage" | grep -F -A4 '/absolute_to_relative_core.h')
+printf '%s\n' "$core" | grep -Fq 'Lines executed:100.00%'
+printf '%s\n' "$core" | grep -Fq 'Taken at least once:100.00%'
