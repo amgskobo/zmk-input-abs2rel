@@ -53,7 +53,9 @@ struct input_event { int type, code; int32_t value; bool sync; };
 struct device { void *data; const void *config; const char *name; };
 typedef int zmk_event_t;
 static struct device valid_device;
-static const struct device *const absolute_to_relative_devices[] = {&valid_device};
+/* Another instance first, so a lookup has to walk the list. */
+static struct device first_device;
+static const struct device *const absolute_to_relative_devices[] = {&first_device, &valid_device};
 static atomic_t *watched_generation;
 static int generation_reads, jump_on_read;
 static atomic_val_t atomic_get(const atomic_t *value) {
@@ -94,14 +96,16 @@ int main(void) {
     event.value = 60;
     assert(!process_axis(&event, &stream->x, INPUT_REL_X));
     assert(event.type == INPUT_EV_REL && event.code == INPUT_REL_X && event.value == 5);
+    stream->btn0_press_suppressed = true;
     apply_generation(stream, 2);
     assert(!stream->x.initialized && !stream->y.initialized);
     assert(stream->applied_generation == 2 && !stream->btn0_press_suppressed);
 
     data.suppression_flags = 0;
+    stream->x.initialized = stream->y.initialized = true;
     event = (struct input_event){.value = 1, .sync = false};
     assert(handle_touch_button(&event, &data, stream) == ZMK_INPUT_PROC_CONTINUE);
-    assert(event.sync);
+    assert(event.sync && !stream->x.initialized && !stream->y.initialized);
     data.suppression_flags = BIT(SUPPRESS_BTN_TOUCH_BIT);
     event = (struct input_event){.value = 0, .sync = true};
     assert(handle_touch_button(&event, &data, stream) == ZMK_INPUT_PROC_STOP);
@@ -144,7 +148,9 @@ int main(void) {
     event = (struct input_event){.type = INPUT_EV_ABS, .code = 99};
     assert(absolute_to_relative_handle_event(&dev, &event, 0, 0, &state) == ZMK_INPUT_PROC_CONTINUE);
     event = (struct input_event){.type = INPUT_EV_KEY, .code = INPUT_BTN_TOUCH, .value = 1};
+    assert(stream->x.initialized);
     assert(absolute_to_relative_handle_event(&dev, &event, 0, 0, &state) == ZMK_INPUT_PROC_CONTINUE);
+    assert(event.sync && !stream->x.initialized); /* the press drops the reference */
     data.suppression_flags = BIT(SUPPRESS_BTN0_BIT);
     event = (struct input_event){.type = INPUT_EV_KEY, .code = INPUT_BTN_0, .value = 1};
     assert(absolute_to_relative_handle_event(&dev, &event, 0, 0, &state) == ZMK_INPUT_PROC_STOP);
@@ -158,6 +164,12 @@ int main(void) {
     event = (struct input_event){.type = INPUT_EV_ABS, .code = INPUT_ABS_X, .value = 42, .sync = true};
     assert(absolute_to_relative_handle_event(&dev, &event, 0, 0, &state) == ZMK_INPUT_PROC_STOP);
     assert(stream->applied_generation == 4 && event.code == COORD_INVALID_ZERO && !event.sync);
+    /* A key that would have passed, discarded the same way. */
+    generation_reads = 0;
+    event = (struct input_event){.type = INPUT_EV_KEY, .code = INPUT_BTN_TOUCH, .value = 1};
+    assert(absolute_to_relative_handle_event(&dev, &event, 0, 0, &state) == ZMK_INPUT_PROC_STOP);
+    assert(stream->applied_generation == 5 && event.code == COORD_INVALID_ZERO && !event.sync);
+    watched_generation = NULL;
 
     struct absolute_to_relative_suppression readback = {0};
     struct absolute_to_relative_config config = {.suppression = {.btn_touch = true, .btn0 = false}};
@@ -169,7 +181,16 @@ int main(void) {
     assert(absolute_to_relative_set_suppression(NULL, &flags) == -EINVAL);
     assert(absolute_to_relative_set_suppression(&valid_device, NULL) == -EINVAL);
     assert(absolute_to_relative_set_suppression(&other_device, &flags) == -ENODEV);
+    /* Init resets every stream, whatever it held before. */
+    for (size_t i = 0; i < ABSOLUTE_TO_RELATIVE_STREAM_COUNT; i++) {
+        data.streams[i].btn0_press_suppressed = true;
+        data.streams[i].applied_generation = 7;
+        data.streams[i].x.initialized = data.streams[i].y.initialized = true;
+    }
     assert(absolute_to_relative_init(&valid_device) == 0);
+    for (size_t i = 0; i < ABSOLUTE_TO_RELATIVE_STREAM_COUNT; i++) {
+        assert(!data.streams[i].btn0_press_suppressed && data.streams[i].applied_generation == 0);
+    }
     assert(data.suppression_flags == BIT(SUPPRESS_BTN_TOUCH_BIT));
     assert(data.reset_generation == 0 && !stream->x.initialized && !stream->y.initialized);
     assert(!data.streams[1].x.initialized && !data.streams[1].y.initialized);
@@ -180,6 +201,8 @@ int main(void) {
     assert(absolute_to_relative_get_suppression(&valid_device, &readback) == 0);
     assert(!readback.btn_touch && readback.btn0);
     assert(absolute_to_relative_layer_listener(NULL) == ZMK_EV_EVENT_BUBBLE);
+    /* Every device in the list counts, the first as much as the last. */
+    assert(absolute_to_relative_device_valid(&first_device));
     assert(data.reset_generation == 1);
     puts("absolute-to-relative driver event helpers: PASS");
     return 0;
