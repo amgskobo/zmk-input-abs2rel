@@ -1,0 +1,5 @@
+/Mouse (movement|scroll) set to 0\/0$/d
+s/^d_00: @[0-9:.]{15}  .{19}<[a-z]+> absolute_to_relative: [a-z_]+: (.*)/central abs2rel: \1/p
+s/^d_00: @[0-9:.]{15}  .{19}<[a-z]+> zmk: zmk_hid_mouse_[a-z_]+: (.*)/central hid: \1/p
+s/^d_00: @[0-9:.]{15}  .{19}<[a-z]+> zmk: [a-z_]+: (.*layer.*)/central \1/p
+s/^d_02: @[0-9:.]{15}  +([0-9a-f]{2}( +[0-9a-f]{2})+).*/host report \1/p

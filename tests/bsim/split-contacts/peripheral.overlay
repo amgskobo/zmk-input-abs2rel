@@ -1,0 +1,56 @@
+/*
+ * Copyright (c) 2026 amgskobo
+ * SPDX-License-Identifier: MIT
+ *
+ * A touchpad on the peripheral, as ZMK's input mock: one frame every 100 ms,
+ * each ending in a sync, from 4 s on (the link is up well before then).
+ */
+
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+#include "shared.dtsi"
+
+&kscan {
+    /delete-property/ exit-after;
+    events = <>;
+};
+
+/ {
+    mock_pad: mock_pad {
+        compatible = "zmk,input-mock";
+        status = "okay";
+        event-startup-delay = <4000>;
+        event-period = <100>;
+        events
+            /* First contact: lands at (100, 100) - a reference, no motion. */
+            = <INPUT_EV_KEY INPUT_BTN_TOUCH 1 0>
+            , <INPUT_EV_ABS INPUT_ABS_X 100 0>
+            , <INPUT_EV_ABS INPUT_ABS_Y 100 1>
+            /* Raw (10, 20) smooths to (5, 10). */
+            , <INPUT_EV_ABS INPUT_ABS_X 110 0>
+            , <INPUT_EV_ABS INPUT_ABS_Y 120 1>
+            /* Raw (20, 20) smooths to (15, 20). */
+            , <INPUT_EV_ABS INPUT_ABS_X 130 0>
+            , <INPUT_EV_ABS INPUT_ABS_Y 140 1>
+            /* Lift, then the final pair the pad reports after it. */
+            , <INPUT_EV_KEY INPUT_BTN_TOUCH 0 1>
+            , <INPUT_EV_ABS INPUT_ABS_X 131 0>
+            , <INPUT_EV_ABS INPUT_ABS_Y 141 1>
+            /* Second contact lands far away at (900, 900): no jump. */
+            , <INPUT_EV_KEY INPUT_BTN_TOUCH 1 0>
+            , <INPUT_EV_ABS INPUT_ABS_X 900 0>
+            , <INPUT_EV_ABS INPUT_ABS_Y 900 1>
+            /* Raw (-10, -20) smooths to (-5, -10). */
+            , <INPUT_EV_ABS INPUT_ABS_X 890 0>
+            , <INPUT_EV_ABS INPUT_ABS_Y 880 1>
+            /* Raw (-30, -30) smooths to (-20, -25). */
+            , <INPUT_EV_ABS INPUT_ABS_X 860 0>
+            , <INPUT_EV_ABS INPUT_ABS_Y 850 1>
+            , <INPUT_EV_KEY INPUT_BTN_TOUCH 0 1>
+            ;
+    };
+};
+
+&split_input {
+    device = <&mock_pad>;
+};

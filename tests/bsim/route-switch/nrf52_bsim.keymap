@@ -1,0 +1,51 @@
+/*
+ * Copyright (c) 2026 amgskobo
+ * SPDX-License-Identifier: MIT
+ *
+ * A key on the central moves one contact from the peripheral's pad between two
+ * converters while the finger stays down. Each switch costs one reference
+ * sample and never produces a jump, and a BTN_0 press that reached the host
+ * on the default route is released on the other one, whose converter
+ * suppresses BTN_0 but did not see that press. A press and release both made
+ * on layer 1 stay suppressed.
+ *
+ * The pad's frames arrive every 100 ms from 4.0 s (peripheral.overlay); the
+ * key goes down at 4.45 s, up at 4.75 s, down at 5.05 s and up at 5.25 s,
+ * midway between frames so the split link's latency cannot reorder them.
+ */
+
+#include <behaviors.dtsi>
+#include <dt-bindings/zmk/keys.h>
+#include <dt-bindings/zmk/kscan_mock.h>
+
+#include "shared.dtsi"
+
+&kscan {
+    /delete-property/ exit-after;
+    /* A mock event's delay is also the wait after it, so a no-op release
+     * leads: it fires at 2.225 s and the press 2.225 s later. */
+    events = <ZMK_MOCK_RELEASE(1,1,2225) ZMK_MOCK_PRESS(0,0,300) ZMK_MOCK_RELEASE(0,0,300)
+              ZMK_MOCK_PRESS(0,0,200) ZMK_MOCK_RELEASE(0,0,200)>;
+};
+
+&split_listener {
+    status = "okay";
+};
+
+/ {
+    keymap {
+        compatible = "zmk,keymap";
+
+        default_layer {
+            bindings = <
+            &mo 1 &kp B
+            &kp C &kp D>;
+        };
+
+        scroll_layer {
+            bindings = <
+            &trans &trans
+            &trans &trans>;
+        };
+    };
+};
