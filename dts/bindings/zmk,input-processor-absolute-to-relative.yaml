@@ -11,8 +11,11 @@ properties:
   suppress-btn-touch:
     description: >-
       Suppress INPUT_BTN_TOUCH events so ZMK does not interpret contact as
-      mouse button 0. Suppression defaults to true even when this property is
-      omitted; the property remains available to make that policy explicit.
+      mouse button 0. Only a release paired with a press consumed by this
+      stream is suppressed; a forwarded press keeps its release across policy
+      or route changes, including later consumed repeats. Suppression defaults
+      to true even when this property
+      is omitted; the property remains available to make that policy explicit.
     type: boolean
   suppress-btn0:
     description: >-

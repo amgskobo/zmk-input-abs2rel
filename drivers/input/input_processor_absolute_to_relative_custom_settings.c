@@ -10,9 +10,8 @@
  * that also carries tap-to-click, one setting is a duplicate button and the
  * other is a missing one, and which is which depends on the pad.
  *
- * This file owns persistence. The driver deliberately stores nothing, so
- * there is one owner for the value and no way for the two to disagree after a
- * reboot.
+ * The custom-settings registry owns persistence. This adapter reads its
+ * values after load and change events; the driver deliberately stores nothing.
  */
 
 #define DT_DRV_COMPAT zmk_input_processor_absolute_to_relative
@@ -21,6 +20,7 @@
 
 #include <zephyr/devicetree.h>
 #include <zephyr/init.h>
+#include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
 #include <cormoran/zmk/custom_settings.h>
@@ -30,7 +30,7 @@
 #include <zmk-input-abs2rel/absolute_to_relative.h>
 #include <zmk-input-abs2rel/custom_settings.h>
 
-LOG_MODULE_DECLARE(zmk, CONFIG_ZMK_LOG_LEVEL);
+LOG_MODULE_REGISTER(zmk_input_abs2rel_input_processor_absolute_to_relative_custom_settings, CONFIG_ZMK_INPUT_ABS2REL_LOG_LEVEL);
 
 /*
  * Registers the namespace these parameters are published under.
@@ -123,8 +123,14 @@ static bool read_flag(const struct zmk_custom_setting *setting, bool *out) {
         }                                                                                          \
     }
 
+/* Callbacks run on the raising thread. Keep re-read and apply in one order,
+ * so an older paused reader cannot finish after a newer callback. */
+K_MUTEX_DEFINE(abs2rel_settings_apply_mutex);
+
 static void absolute_to_relative_apply_settings(void) {
+    k_mutex_lock(&abs2rel_settings_apply_mutex, K_FOREVER);
     DT_INST_FOREACH_STATUS_OKAY(ABSOLUTE_TO_RELATIVE_APPLY)
+    k_mutex_unlock(&abs2rel_settings_apply_mutex);
 }
 
 static int absolute_to_relative_settings_event_cb(const zmk_event_t *eh) {
@@ -175,8 +181,9 @@ ZMK_SUBSCRIPTION(absolute_to_relative_custom_settings, zmk_custom_settings_initi
  * were being edited. A stored value restores into only one of them too.
  *
  * String equality across instances is not something the preprocessor can
- * evaluate, so the check runs once at startup and names the duplicated key. It
- * walks descriptors, not values, so it needs nothing from settings_load().
+ * evaluate, so the check reports the collision once at startup without logging
+ * device-specific keys. It walks descriptors, not values, so it needs nothing
+ * from settings_load().
  */
 static int abs2rel_check_unique_keys(void) {
     ZMK_CUSTOM_SETTING_FOREACH(setting) {
@@ -190,9 +197,8 @@ static int abs2rel_check_unique_keys(void) {
             if (other < setting &&
                 strcmp(other->custom_subsystem_id, ZMK_INPUT_ABS2REL_SUBSYSTEM) == 0 &&
                 strcmp(other->key, setting->key) == 0) {
-                LOG_ERR("Duplicate setting key \"%s\": two devicetree nodes share a "
-                        "name, so only one of them is editable",
-                        setting->key);
+                LOG_ERR("Duplicate setting key: two devicetree nodes share a "
+                        "name, so only one of them is editable");
             }
         }
     }

@@ -1,7 +1,10 @@
 # Copyright (c) 2026 amgskobo
 # SPDX-License-Identifier: MIT
 
-"""Exercise production driver code with host stubs and require full coverage of it.
+"""Exercise all production-driver scenarios in quick or full host mode.
+
+Quick runs every fixture under ASan/UBSan. Full additionally executes the
+optimized and measured coverage variants and retains the coverage gate below.
 
 Each fixture names a source file, the functions whose lines and branches it
 gates, and any further functions it only needs in order to compile. They are
@@ -21,6 +24,16 @@ import re
 import subprocess
 import tempfile
 
+import os
+import sys
+
+mode = os.environ.get("ZMK_TEST_MODE", "quick")
+if mode not in ("quick", "full"):
+    raise SystemExit("ZMK_TEST_MODE must be quick or full")
+variants = (('optimized', ['-O2']), ('sanitized', ['-O1', '-g', '-fno-omit-frame-pointer', '-fsanitize=address,undefined', '-fno-sanitize-recover=all']), ('coverage', ['-O0', '--coverage']))
+if mode == "quick":
+    variants = tuple(v for v in variants if v[0] == "sanitized")
+
 root = pathlib.Path(__file__).resolve().parents[2]
 source_dir = root / "drivers/input"
 links = ()
@@ -33,6 +46,7 @@ fixtures = (
         "apply_generation",
         "stream_for_event",
         "process_axis",
+        "consume_button",
         "handle_touch_button",
         "handle_button_suppress",
         "absolute_to_relative_handle_event",
@@ -113,6 +127,7 @@ def body_end(source, opening):
 def misses(gcov_text, ranges):
     """Count lines and branches inside ranges; list what never ran."""
     lines = executed = branches = taken = 0
+    observed = [0 for _range in ranges]
     missed = []
     current = None
     for row in gcov_text.splitlines():
@@ -134,10 +149,17 @@ def misses(gcov_text, ranges):
         if not inside or count == "-":
             continue
         lines += 1
+        for index, (first, last) in enumerate(ranges):
+            if first <= number <= last:
+                observed[index] += 1
         if count.startswith(("#####", "=====")):
             missed.append(f"  {number}: {text.strip()}  (never ran)")
         else:
             executed += 1
+    if not ranges or not lines:
+        raise RuntimeError("coverage report has no executable lines in gated functions")
+    if any(count == 0 for count in observed):
+        raise RuntimeError("coverage report has no executable lines for a gated function range")
     return lines, executed, branches, taken, missed
 
 
@@ -162,53 +184,79 @@ def ungated_functions():
     return missing
 
 
-missing_functions = ungated_functions()
-if missing_functions:
-    raise RuntimeError("functions no fixture gates:\n  " + "\n  ".join(missing_functions))
+def main():
+    emit_settings = None
+    emit_fixture = None
+    if len(sys.argv) != 1:
+        entries = {"--emit-custom-settings": "custom_settings", "--emit-driver": "driver"}
+        if len(sys.argv) != 3 or sys.argv[1] not in entries:
+            raise SystemExit("usage: run.py [--emit-custom-settings|--emit-driver FRESH_SOURCE]")
+        emit_fixture = entries[sys.argv[1]]
+        emit_settings = pathlib.Path(sys.argv[2])
+        if emit_settings.exists() or emit_settings.is_symlink():
+            raise FileExistsError("fresh emitted source required: " + str(emit_settings))
 
-for fixture, file_name, gated, support in fixtures:
-    source_path = source_dir / file_name
-    source = source_path.read_text(encoding="utf-8")
-    functions = []
-    ranges = []
-    for name in (*support, *gated):
-        first, last, text = definition(source, name)
-        if name in gated:
-            ranges.append((first, last))
-        elif not name.startswith("#"):
-            # A harness need not call every function it only compiles.
-            text = "__attribute__((unused)) " + text
-        functions.append(f'#line {first} "{source_path}"\n{text}')
+    missing_functions = ungated_functions()
+    if missing_functions:
+        raise RuntimeError("functions no fixture gates:\n  " + "\n  ".join(missing_functions))
 
-    harness_path = root / "tests/runtime" / f"{fixture}_harness.c"
-    harness = harness_path.read_text(encoding="utf-8")
-    marker = "/* DRIVER_FUNCTIONS */"
-    resume = harness.count("\n", 0, harness.index(marker)) + 2
-    with tempfile.TemporaryDirectory(prefix=f"{fixture}-runtime-") as folder:
-        work = pathlib.Path(folder)
-        unit = work / "test.c"
-        unit.write_text(harness.replace(marker, "\n".join(functions) +
-                                        f'\n#line {resume} "{harness_path}"'), encoding="utf-8")
-        for variant, flags in (
-            ("optimized", ["-O2"]),
-            ("sanitized", ["-O1", "-g", "-fno-omit-frame-pointer",
-                           "-fsanitize=address,undefined", "-fno-sanitize-recover=all"]),
-            ("coverage", ["-O0", "--coverage"]),
-        ):
-            binary = work / variant
-            subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", *flags,
-                            "-I" + str(root / "include"), "-I" + str(source_dir),
-                            "-I" + str(root / "tests/runtime"),
-                            str(unit), *map(str, links), "-o", str(binary)],
-                           check=True)
-            subprocess.run([str(binary)], check=True)
-        subprocess.run(["gcov", "-b", "-c", "-o", str(work / "coverage-test.gcno"), str(unit)],
-                       cwd=work, check=True, capture_output=True, text=True)
-        report = (work / f"{file_name}.gcov").read_text(encoding="utf-8")
-        lines, executed, branches, taken, missed = misses(report, ranges)
-        count = sum(not name.startswith("#") for name in gated)
-        print(f"{fixture}: {count} functions of {file_name}: "
-              f"lines {executed}/{lines}, branches {taken}/{branches}")
-        if missed:
-            print("\n".join(missed))
-            raise RuntimeError(f"{fixture} fell below 100% coverage")
+    for fixture, file_name, gated, support in fixtures:
+        if emit_settings is not None and fixture != emit_fixture:
+            continue
+        source_path = source_dir / file_name
+        source = source_path.read_text(encoding="utf-8")
+        functions = []
+        ranges = []
+        for name in (*support, *gated):
+            first, last, text = definition(source, name)
+            # gcov attributes expanded macro statements to the calling function,
+            # not the macro definition. Require measurement of each real function;
+            # keep the same macro code in those measured callers and fixtures.
+            if name in gated and not name.startswith("#"):
+                ranges.append((first, last))
+            elif name not in gated and not name.startswith("#"):
+                # A harness need not call every function it only compiles.
+                text = "__attribute__((unused)) " + text
+            functions.append(f'#line {first} "{source_path}"\n{text}')
+
+        harness_path = root / "tests/runtime" / f"{fixture}_harness.c"
+        harness = harness_path.read_text(encoding="utf-8")
+        marker = "/* DRIVER_FUNCTIONS */"
+        resume = harness.count("\n", 0, harness.index(marker)) + 2
+        if emit_settings is not None:
+            with emit_settings.open("x", encoding="utf-8") as output:
+                output.write(harness.replace(marker, "\n".join(functions) +
+                                            f'\n#line {resume} "{harness_path}"'))
+            print("Emitted owner fixture:", fixture, emit_settings)
+            raise SystemExit(0)
+        with tempfile.TemporaryDirectory(prefix=f"{fixture}-runtime-") as folder:
+            work = pathlib.Path(folder)
+            unit = work / "test.c"
+            unit.write_text(harness.replace(marker, "\n".join(functions) +
+                                            f'\n#line {resume} "{harness_path}"'), encoding="utf-8")
+            for variant, flags in variants:
+                binary = work / variant
+                subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", *flags,
+                                "-I" + str(root / "include"), "-I" + str(source_dir),
+                                "-I" + str(root / "tests/runtime"),
+                                str(unit), *(["-pthread"] if fixture == "custom_settings" else []),
+                                *map(str, links), "-o", str(binary)],
+                               check=True)
+                subprocess.run([str(binary)], check=True)
+            if mode == "quick":
+                print(f"{fixture}: PASS (all scenarios, ASan/UBSan)")
+                continue
+            subprocess.run(["gcov", "-b", "-c", "-o", str(work / "coverage-test.gcno"), str(unit)],
+                           cwd=work, check=True, capture_output=True, text=True)
+            report = (work / f"{file_name}.gcov").read_text(encoding="utf-8")
+            lines, executed, branches, taken, missed = misses(report, ranges)
+            count = sum(not name.startswith("#") for name in gated)
+            print(f"{fixture}: {count} functions of {file_name}: "
+                  f"lines {executed}/{lines}, branches {taken}/{branches}")
+            if missed:
+                print("\n".join(missed))
+                raise RuntimeError(f"{fixture} fell below 100% coverage")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,15 @@
+# Copyright (c) 2026 amgskobo
+# SPDX-License-Identifier: MIT
+cmake_minimum_required(VERSION 3.20.0)
+find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
+project(abs2rel_settings_boundary)
+if(NOT DEFINED ABS2REL_SETTINGS_FIXTURE)
+  message(FATAL_ERROR "Use tests/native/run-settings.sh")
+endif()
+target_sources(app PRIVATE ${ABS2REL_SETTINGS_FIXTURE})
+target_compile_options(app PRIVATE -Wall -Wextra -Werror)
+target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../../../include)
+target_compile_definitions(app PRIVATE ABS2REL_SETTINGS_NATIVE=1)
+if(ABS2REL_SETTINGS_BYPASS_LOCK)
+  target_compile_definitions(app PRIVATE ABS2REL_SETTINGS_BYPASS_LOCK=1)
+endif()

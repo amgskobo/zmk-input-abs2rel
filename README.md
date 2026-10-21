@@ -8,21 +8,16 @@ Converts absolute pointer coordinates into relative motion, smoothed over two
 samples. For trackpads and touch sensors that report where the finger *is*,
 feeding a pointer stack that wants to know how far it *moved*.
 
-## Why this is its own module
+## Scope
 
-It is an original, not a replacement. ZMK ships its own input processors —
-scaler, transform, code-mapper, temp-layer and others — and
-[zmk-input-processors](https://github.com/amgskobo/zmk-input-processors) holds
-runtime-configurable versions of four of them, each named `runtime-*` so a chain
-shows at a glance which stages can be changed while the keyboard runs.
-
-This has no upstream counterpart, so the prefix would say nothing about it, and
-it kept its plain name as a documented exception. That exception was the
-symptom: it belongs with the other originals —
-[vector-acceleration](https://github.com/amgskobo/zmk-input-vector-acceleration),
-[inertia](https://github.com/amgskobo/zmk-input-inertia),
-[padstick](https://github.com/amgskobo/zmk-input-padstick) — each in a module
-of its own.
+This module provides absolute-to-relative conversion with per-input state and
+optional runtime settings. It can be used independently of
+[zmk-input-processors](https://github.com/amgskobo/zmk-input-processors), which
+provides runtime-configurable versions of ZMK's standard input processors.
+Related processors are available as separate modules:
+[vector acceleration](https://github.com/amgskobo/zmk-input-vector-acceleration),
+[inertia](https://github.com/amgskobo/zmk-input-inertia), and
+[PadStick](https://github.com/amgskobo/zmk-input-padstick).
 
 ## Installation
 
@@ -62,9 +57,10 @@ declared node. The explicit property remains accepted so existing overlays and
 overlays that want to document the policy keep building.
 
 Devicetree boolean properties express `true` by being present; they cannot
-carry a `false` value. Therefore a build without runtime custom settings always
-suppresses `BTN_TOUCH`. Enable the custom-settings option below when the flag
-must be switchable to `false`.
+carry a `false` value. Therefore a build without runtime custom settings
+suppresses `BTN_TOUCH` presses and their paired releases. Releases without a
+press consumed by this stream still pass through. Enable the custom-settings
+option below when the flag must be switchable to `false`.
 
 ### Standard nodes
 
@@ -103,13 +99,16 @@ first coordinates after an edge establish a new reference and are consumed;
 without a separate boundary a release could remain queued with no later event
 to send it, leaving mouse button 0 held at the host.
 
-Turning `suppress-btn0` off does not release a press already swallowed: that
-press's release still passes through, for the same reason it does across a
-layer change. `suppress-btn0` never drops a `BTN_0` release whose press was not
-suppressed here. Passing a release through is always safe — the press it belongs
-to already reached the host — while dropping one would leave the button held
-down with nothing left to release it. That record is cleared on a layer change
-too.
+For both `BTN_TOUCH` and `BTN_0`, suppression consumes a release only if
+this stream consumed its press and suppression remains enabled. Enabling
+`suppress-btn-touch` after forwarding a touch press therefore preserves its
+release, with a synchronization boundary of its own. Disabling either flag
+passes future edges through; it does not emit a press already swallowed.
+A later consumed press or repeat cannot revoke the release owed by an earlier
+forwarded press. Each listener keeps separate records for touch and physical
+clicks. A layer change clears consumed-press records but retains observed
+forwarded presses until their release. Initialization clears both kinds of
+record. A new press discarded during a layer reset is never recorded as sent.
 
 ## How it works
 
@@ -218,27 +217,32 @@ it — it builds and runs on upstream ZMK with no other module present.
 
 ## Tests
 
-`tests/run.sh` compiles the production conversion core with strict warnings,
-then runs it in optimized and AddressSanitizer/UndefinedBehaviorSanitizer builds
-plus a coverage build. The same command also lifts every function of the driver
--- event, generation, initialization, settings API and layer listener -- and the
-settings bridge's reader and duplicate-key check into the stubbed harnesses in
-`tests/runtime/`. CI requires 100% line and branch coverage of the pure
-conversion core and of each lifted function. The apply step that turns stored
-settings into driver calls is lifted with its macro too, and the runner fails if
-any function in the sources has no gate. Devicetree instantiation itself is left
-to the integration fixtures below. The core tests cover first-sample seeding,
-reset, symmetric negative rounding, the full `int32_t` coordinate range and
-independent streams.
+Run from the repository root with Docker and Git Bash:
 
-GitHub Actions also builds `tests/integration` against both upstream ZMK with
-custom settings disabled and the DYA fork with custom settings enabled. The
-fixtures exercise the module metadata, Kconfig, Devicetree binding, CMake
-integration, two listeners sharing one processor, and the omitted
-`suppress-btn-touch` property on a real firmware target. The DYA build
-additionally verifies that the subsystem and representative settings keys are
-linked into the firmware. All checks run for every pull request and for pushes
-to `main`, and may be started manually.
+```bash
+bash tests/run-docker.sh
+ZMK_TEST_MODE=full bash tests/run-docker.sh
+```
+
+Quick runs every host behavioral scenario once under
+AddressSanitizer/UndefinedBehaviorSanitizer. Full retains those scenarios and
+adds optimized, coverage and supported ABI variants. Full mode requires 100%
+line and branch coverage for the pure conversion core and the gated driver
+and settings functions. The harnesses use controlled framework interfaces;
+they do not establish physical HID or split delivery.
+
+The separate integration entries build the module on unchanged upstream ZMK
+and DYA. The DYA variant also checks Custom Studio settings registration:
+
+```bash
+bash tests/run-integration-docker.sh upstream
+bash tests/run-integration-docker.sh dya
+```
+
+See [the test guide](tests/README.md) for named fixtures, supported variants,
+offline dependency selection and remaining physical acceptance gaps. CI uses
+quick mode for push/PR and full mode for scheduled/manual host runs; integration
+jobs retain their separate firmware checks.
 
 ## License
 

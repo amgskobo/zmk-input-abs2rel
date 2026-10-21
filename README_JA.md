@@ -8,21 +8,15 @@
 processor です。指が *どこにあるか* を報告するトラックパッドやタッチセンサーを、
 *どれだけ動いたか* を必要とするポインター処理チェーンへ接続します。
 
-## この module が独立している理由
+## 対象範囲
 
-これは置き換えではなく独自の processor です。ZMK には scaler、transform、
-code-mapper、temp-layer などの input processor があり、
-[zmk-input-processors](https://github.com/amgskobo/zmk-input-processors) は
-そのうち 4 つを実行時に設定変更できるようにしたものです。どれも `runtime-*` と
-名付けられており、chain を見ただけで実行中に変更できる stage が分かります。
-
-この processor には upstream に対応するものがないため、prefix を付けても何も
-表しません。以前は prefix のない名前のまま例外として文書化していましたが、
-例外であること自体が問題の兆候でした。他の独自 processor
-([vector-acceleration](https://github.com/amgskobo/zmk-input-vector-acceleration)、
-[inertia](https://github.com/amgskobo/zmk-input-inertia)、
-[padstick](https://github.com/amgskobo/zmk-input-padstick))と同じく、
-専用の module に置いています。
+入力ごとに独立した状態を持つ絶対座標から相対移動への変換と、任意の実行時設定を
+提供します。ZMK標準の入力処理を実行時に設定変更する
+[zmk-input-processors](https://github.com/amgskobo/zmk-input-processors)とは
+独立して利用できます。関連する処理も個別のモジュールとして提供しています。
+[ベクトル加速](https://github.com/amgskobo/zmk-input-vector-acceleration)、
+[慣性](https://github.com/amgskobo/zmk-input-inertia)、
+[PadStick](https://github.com/amgskobo/zmk-input-padstick)を参照してください。
 
 ## 導入
 
@@ -62,8 +56,9 @@ overlay や、方針を明示したい overlay がそのままビルドできる
 明示も引き続き受け付けます。
 
 Devicetree の boolean property は存在することで `true` を表し、`false` の値を
-持てません。そのため runtime custom settings を使わないビルドでは、`BTN_TOUCH` は
-常に抑止されます。`false` へ切り替える必要がある場合は、後述の custom settings
+持てません。そのため runtime custom settings を使わないビルドでは、`BTN_TOUCH` の
+press と対応する release を抑止します。この stream で press を消費していない
+release は通します。`false` へ切り替える必要がある場合は、後述の custom settings
 option を有効にしてください。
 
 ### 標準 node
@@ -100,12 +95,15 @@ listener の instance index を渡すため、同じ node を使う 2 つの lis
 消費されるため、別の境界がないと release が送られないまま残り、host で mouse
 button 0 が押されたままになるからです。
 
-`suppress-btn0` を無効にしても、すでに抑止した press が host へ送られることは
-ありません。その press の release は、レイヤー変更をまたぐ場合と同じ理由で
-そのまま通します。`suppress-btn0` は、ここで press を抑止していない `BTN_0` の
-release を決して破棄しません。release を通すことは常に安全です(対応する press は
-すでに host に届いています)。一方、破棄するとそのボタンは押されたまま、解除する
-手段がなくなります。この記録もレイヤー変更時にクリアされます。
+`BTN_TOUCH` と `BTN_0` は、同じ stream で press を消費し、抑止が引き続き
+有効な場合だけ release も消費します。touch press を通した後で
+`suppress-btn-touch` を有効にしても、release は単独の sync 境界として通ります。
+どちらの抑止も、無効にすると以後の edge を通します。すでに消費した press を
+後から送ることはありません。後続の press や repeat を消費しても、すでに通した
+press の release は保持します。touch と物理クリックの記録は listener ごとに
+独立しています。レイヤー変更では消費済み press の記録をクリアし、通過済み
+press は release まで保持します。初期化は両方をクリアします。レイヤー変更中に
+破棄した新しい press を、通過済みとして記録することはありません。
 
 ## 動作
 
@@ -210,24 +208,31 @@ ZMK でもビルド・動作します。
 
 ## テスト
 
-`tests/run.sh` は、製品と同じ変換 core を厳しい警告設定でコンパイルし、最適化
-ビルド、AddressSanitizer/UndefinedBehaviorSanitizer ビルド、カバレッジ計測で実行します。
-同じコマンドで、driver の全関数(イベント処理、世代切替、初期化、設定API、layer listener)と、
-設定ブリッジの読み出し・重複キー検査を `tests/runtime/` のスタブ付きハーネスに取り出して
-実行します。CI は純粋な変換 core と取り出した各関数の行・分岐 100% を要求します。
-保存された設定をドライバ呼び出しに変える適用処理もマクロごと取り出し、ソースに
-ゲートのない関数が1つでもあれば runner が失敗します。devicetree からの
-インスタンス生成そのものは下記の結合テストで確認します。
-最初のサンプルによる基準点の設定、リセット、負方向の対称な丸め、`int32_t` の座標全範囲、
-stream の独立性を確認します。
+DockerとGit Bashを使い、リポジトリのルートから実行します。
 
-GitHub Actions では、custom settings を無効にした upstream ZMK と、有効にした DYA
-fork の両方に対して `tests/integration` もビルドします。fixture では、module の
-metadata、Kconfig、Devicetree binding、CMake 連携、1 つの processor を共有する
-2 つの listener、`suppress-btn-touch` property を省略した場合を、実際の firmware
-target で確認します。DYA ビルドでは、subsystem と代表的な設定キーが firmware に
-リンクされていることも確認します。すべての確認は pull request ごとと `main` への
-push で実行され、手動でも実行できます。
+```bash
+bash tests/run-docker.sh
+ZMK_TEST_MODE=full bash tests/run-docker.sh
+```
+
+Quickはすべてのホスト動作シナリオをASan/UBSan付きで1回ずつ実行します。
+Fullは同じシナリオに最適化、カバレッジ、対応ABIの検証を加えます。
+Fullでは、変換コアと検証対象のドライバー・設定関数に行・分岐100%を要求します。
+ハーネス内のフレームワークは制御された代替実装で、実機のHIDやsplitの配送を
+確認するものではありません。
+
+別の結合テストで、変更していないupstream ZMKとDYAに対するビルドを確認します。
+DYA版ではCustom Studioの設定登録も確認します。
+
+```bash
+bash tests/run-integration-docker.sh upstream
+bash tests/run-integration-docker.sh dya
+```
+
+個別のfixture、対応構成、オフラインでの依存選択、実機での未検証項目は
+[テストガイド](tests/README.md)を参照してください。
+CIのホスト検証はpush/PRでquick、定期・手動実行でfullを使います。
+結合テストのファームウェア検証は別に実行します。
 
 ## License
 

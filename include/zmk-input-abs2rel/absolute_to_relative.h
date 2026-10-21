@@ -18,7 +18,7 @@
 #include <zephyr/device.h>
 
 struct absolute_to_relative_suppression {
-    /* Consume INPUT_BTN_TOUCH after using it to drop the reference point. */
+    /* Consume touch presses and paired releases, after dropping the reference. */
     bool btn_touch;
     /* Consume INPUT_BTN_0 when the pad reports a physical click. */
     bool btn0;
@@ -26,7 +26,8 @@ struct absolute_to_relative_suppression {
 
 /*
  * Reads the flags the processor is applying right now. Returns -ENODEV when
- * dev is not an absolute-to-relative processor instance.
+ * dev is not an absolute-to-relative processor instance, or -EINVAL when dev
+ * or out is NULL.
  */
 int absolute_to_relative_get_suppression(const struct device *dev,
                                          struct absolute_to_relative_suppression *out);
@@ -34,14 +35,19 @@ int absolute_to_relative_get_suppression(const struct device *dev,
 /*
  * Applies new flags.
  *
- * Turning btn0 suppression off does not release a press this processor has
- * already swallowed: the driver still passes that press's release through, for
- * the same reason it does across a layer change. Dropping it would leave the
- * button held down with nothing left to release it.
+ * The update emits no input event. For both touch and BTN_0, a release is
+ * consumed only while suppression is enabled, its press was consumed by this
+ * stream and no earlier forwarded press still needs a release. A consumed
+ * repeat cannot revoke that release. Disabling suppression passes future
+ * edges through. Layer resets retire consumed-press records, but keep a
+ * forwarded press pending until release; init clears both. A new press
+ * discarded during a reset is never recorded as forwarded. Forwarded touch
+ * edges own a sync boundary. Reapplying the current flags is a no-op for operational logging.
  *
  * Nothing is persisted here; that is the settings layer's job, which is what
  * keeps this driver free of a second owner for the same value.
- * Returns -ENODEV when dev is not an absolute-to-relative processor instance.
+ * Returns -ENODEV when dev is not an absolute-to-relative processor instance,
+ * or -EINVAL when dev or flags is NULL.
  */
 int absolute_to_relative_set_suppression(const struct device *dev,
                                          const struct absolute_to_relative_suppression *flags);

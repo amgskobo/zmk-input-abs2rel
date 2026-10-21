@@ -13,6 +13,12 @@ upstream | dya) ;;
     ;;
 esac
 
+if [ -n "${ZMK_TEST_OFFLINE_WORKSPACE:-}" ]; then
+    work_dir="${ZMK_TEST_OUTPUT:?set ZMK_TEST_OUTPUT to a fresh evidence directory}"
+    workspace="$(python3 /src/tests/integration/offline.py "$ZMK_TEST_OFFLINE_WORKSPACE" "$variant" "/src/tests/integration/config/$variant/west.yml" "$work_dir")"
+    cd "$workspace"
+    west zephyr-export
+else
 work_dir="$(mktemp -d "${TMPDIR:-/tmp}/zmk-input-abs2rel-integration.XXXXXX")"
 
 cleanup() {
@@ -27,14 +33,17 @@ west init -l config
 west update --narrow --fetch-opt=--depth=1
 west zephyr-export
 
-export ZEPHYR_BASE="$work_dir/zephyr"
+workspace="$work_dir"
+fi
+
+export ZEPHYR_BASE="$workspace/zephyr"
 
 cmake_args=()
 if [ "$variant" = dya ]; then
     cmake_args+=("-DEXTRA_CONF_FILE=/src/tests/integration/custom-settings.conf")
 fi
 
-west build -s "$work_dir/zmk/app" -d "$work_dir/build" -b xiao_ble/nrf52840/zmk -- \
+west build -s "$workspace/zmk/app" -d "$work_dir/build" -b xiao_ble/nrf52840/zmk -- \
     -DZMK_EXTRA_MODULES="/src;/src/tests/integration/firmware" \
     -DSHIELD=abs2rel_test \
     "${cmake_args[@]}"

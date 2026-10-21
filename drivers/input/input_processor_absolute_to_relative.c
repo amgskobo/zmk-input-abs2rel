@@ -20,7 +20,7 @@
 #include <zmk-input-abs2rel/absolute_to_relative.h>
 #include <zmk-input-abs2rel/absolute_to_relative_core.h>
 
-LOG_MODULE_REGISTER(absolute_to_relative, CONFIG_ZMK_LOG_LEVEL);
+LOG_MODULE_REGISTER(zmk_input_abs2rel_input_processor_absolute_to_relative, CONFIG_ZMK_INPUT_ABS2REL_LOG_LEVEL);
 
 #define COORD_INVALID_ZERO 0xFFF
 #define SUPPRESS_BTN_TOUCH_BIT 0
@@ -37,14 +37,19 @@ struct absolute_to_relative_stream {
     struct absolute_to_relative_axis_state x;
     struct absolute_to_relative_axis_state y;
     /*
-     * Set while a BTN_0 press has been suppressed here and its release has not
+     * Set while a touch or BTN_0 press was consumed and its release has not
      * been seen yet. Suppression has to stay paired: which processors run is
      * decided per event from the layer active at that moment, so a press and
      * its release can be routed differently when the layer changes in between.
      * Dropping a release whose press was never suppressed leaves the button
      * held down on the host with nothing left to release it.
      */
+    bool btn_touch_press_suppressed;
     bool btn0_press_suppressed;
+    /* An observed forwarded press still needs a release after repeats or
+     * generation resets. */
+    bool btn_touch_press_forwarded;
+    bool btn0_press_forwarded;
     atomic_val_t applied_generation;
 };
 
@@ -88,6 +93,9 @@ static inline void drop_reference(struct absolute_to_relative_stream *stream) {
 static inline void apply_generation(struct absolute_to_relative_stream *stream,
                                     atomic_val_t generation) {
     drop_reference(stream);
+    /* A new route cannot claim an old consumed press. An already forwarded
+     * press still needs a release even if repeats arrive on this route. */
+    stream->btn_touch_press_suppressed = false;
     stream->btn0_press_suppressed = false;
     stream->applied_generation = generation;
 }
@@ -116,10 +124,6 @@ static inline bool process_axis(struct input_event *event,
 
     if (!absolute_to_relative_axis_apply(axis, event->value, &relative)) {
         /* First report on this axis - store position and suppress output. */
-        if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-            LOG_DBG("Initial %s position: %d (suppressed)", (rel_code == INPUT_REL_X) ? "X" : "Y",
-                    event->value);
-        }
 
         /* Mark event as invalid for clarity */
         event->code = COORD_INVALID_ZERO;
@@ -138,10 +142,6 @@ static inline bool process_axis(struct input_event *event,
      * come back to where it started. Division truncates towards zero, which
      * treats both directions alike.
      */
-    if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-        LOG_DBG("%s: %d -> rel_%s: %d", (rel_code == INPUT_REL_X) ? "X" : "Y", event->value,
-                (rel_code == INPUT_REL_X) ? "x" : "y", relative);
-    }
 
     /* Update event and state */
     event->type = INPUT_EV_REL;
@@ -149,6 +149,27 @@ static inline bool process_axis(struct input_event *event,
     event->value = relative;
 
     return false; /* Signal to continue processing */
+}
+
+/* Track observed press/release ownership for both button kinds. */
+static bool consume_button(const struct input_event *event, bool suppress,
+                           bool *press_suppressed, bool *press_forwarded) {
+    if (event->value != 0) {
+        if (suppress) {
+            /* A repeat may be consumed, but an earlier forwarded press still
+             * needs its release. Nonzero values keep the existing press policy. */
+            *press_suppressed = !*press_forwarded;
+            return true;
+        }
+        *press_suppressed = false;
+        *press_forwarded = true;
+        return false;
+    }
+
+    const bool consume = suppress && *press_suppressed;
+    *press_suppressed = false;
+    *press_forwarded = false;
+    return consume;
 }
 
 /**
@@ -169,56 +190,29 @@ static int handle_touch_button(struct input_event *event, struct absolute_to_rel
                                struct absolute_to_relative_stream *stream) {
     drop_reference(stream);
 
-    if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-        LOG_DBG("Touch %s - reference dropped", event->value ? "started" : "released");
-    }
-
-    if (atomic_get(&data->suppression_flags) & BIT(SUPPRESS_BTN_TOUCH_BIT)) {
-        if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-            LOG_DBG("Suppressing BTN_TOUCH");
-        }
+    if (consume_button(event,
+                       (atomic_get(&data->suppression_flags) & BIT(SUPPRESS_BTN_TOUCH_BIT)) != 0,
+                       &stream->btn_touch_press_suppressed, &stream->btn_touch_press_forwarded)) {
         event->code = COORD_INVALID_ZERO;
         event->sync = false;
         return ZMK_INPUT_PROC_STOP;
     }
 
-    /* The source groups this edge with coordinates using sync=false. Once the
-     * first coordinate pair is consumed as a reference, no later event may be
-     * available to flush a release. A forwarded edge therefore owns a report
-     * boundary of its own. */
+    /* A forwarded edge owns a boundary: following coordinates may all be
+     * consumed as the new reference and leave no event to flush a release. */
     event->sync = true;
-
     return ZMK_INPUT_PROC_CONTINUE;
 }
 
-/**
- * Handle button suppression (BTN_0)
- *
- * A release is only dropped when the matching press was dropped here. A press
- * that reached the host on another layer keeps its release, so the button can
- * never be left stuck down.
- */
+/* Consume only releases whose press this stream consumed, with no forwarded
+ * press still awaiting release. A live policy change may consume a repeat. */
 static int handle_button_suppress(struct input_event *event,
                                   struct absolute_to_relative_data *data,
                                   struct absolute_to_relative_stream *stream) {
-    if (!(atomic_get(&data->suppression_flags) & BIT(SUPPRESS_BTN0_BIT))) {
-        /* Not suppressing here, so nothing of ours is outstanding. */
-        stream->btn0_press_suppressed = false;
+    if (!consume_button(event,
+                        (atomic_get(&data->suppression_flags) & BIT(SUPPRESS_BTN0_BIT)) != 0,
+                        &stream->btn0_press_suppressed, &stream->btn0_press_forwarded)) {
         return ZMK_INPUT_PROC_CONTINUE;
-    }
-
-    bool was_suppressed = stream->btn0_press_suppressed;
-
-    stream->btn0_press_suppressed = event->value != 0;
-
-    if (!event->value && !was_suppressed) {
-        /* A route change between the press and its release, which is routine. */
-        LOG_DBG("Passing BTN_0 release: its press was not suppressed here");
-        return ZMK_INPUT_PROC_CONTINUE;
-    }
-
-    if (IS_ENABLED(CONFIG_ZMK_LOG_LEVEL_DBG)) {
-        LOG_DBG("Suppressing BTN_0 %s", event->value ? "press" : "release");
     }
     event->code = COORD_INVALID_ZERO;
     event->sync = false;
@@ -245,6 +239,8 @@ static int absolute_to_relative_handle_event(const struct device *dev, struct in
         apply_generation(stream, generation_before);
     }
 
+    const bool touch_forwarded_before = stream->btn_touch_press_forwarded;
+    const bool btn0_forwarded_before = stream->btn0_press_forwarded;
     int result = ZMK_INPUT_PROC_CONTINUE;
 
     /* Handle button events */
@@ -283,6 +279,15 @@ static int absolute_to_relative_handle_event(const struct device *dev, struct in
     atomic_val_t generation_after = atomic_get(&data->reset_generation);
     if (generation_after != generation_before) {
         apply_generation(stream, generation_after);
+        /* An obsolete coordinate reference cannot revoke a release that was
+         * not paired with a press suppressed by this stream. */
+        if (result == ZMK_INPUT_PROC_CONTINUE && event->type == INPUT_EV_KEY && !event->value) {
+            return result;
+        }
+        /* A discarded new press was never forwarded. Restore prior release
+         * ownership, including any earlier press still held downstream. */
+        stream->btn_touch_press_forwarded = touch_forwarded_before;
+        stream->btn0_press_forwarded = btn0_forwarded_before;
         event->code = COORD_INVALID_ZERO;
         event->sync = false;
         return ZMK_INPUT_PROC_STOP;
@@ -301,7 +306,10 @@ static int absolute_to_relative_init(const struct device *dev) {
     atomic_set(&data->suppression_flags, encode_suppression(&config->suppression));
     atomic_set(&data->reset_generation, 0);
     for (size_t i = 0U; i < ABSOLUTE_TO_RELATIVE_STREAM_COUNT; i++) {
+        data->streams[i].btn_touch_press_suppressed = false;
         data->streams[i].btn0_press_suppressed = false;
+        data->streams[i].btn_touch_press_forwarded = false;
+        data->streams[i].btn0_press_forwarded = false;
         data->streams[i].applied_generation = 0;
         drop_reference(&data->streams[i]);
     }
@@ -384,9 +392,10 @@ int absolute_to_relative_set_suppression(const struct device *dev,
 
     struct absolute_to_relative_data *data = dev->data;
 
-    atomic_set(&data->suppression_flags, encode_suppression(flags));
-
-    LOG_DBG("%s: suppress btn_touch %d, btn0 %d", dev->name, flags->btn_touch, flags->btn0);
+    atomic_val_t next = encode_suppression(flags);
+    if (atomic_set(&data->suppression_flags, next) != next) {
+        LOG_INF("Suppression changed (btn_touch=%d, btn0=%d)", flags->btn_touch, flags->btn0);
+    }
 
     return 0;
 }

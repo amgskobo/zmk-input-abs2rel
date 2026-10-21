@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "owner": "zmk-input-abs2rel",
+  "supported_cores": [
+    "stock-zmk",
+    "dya"
+  ],
+  "unsupported_core_status": "NOT APPLICABLE",
+  "commands": [
+    "bash tests/run-docker.sh",
+    "python3 -m unittest discover -s tests -p 'test_*.py' -v (inside the Linux build image)",
+    "python3 -m unittest discover -s tests/integration -p test_*.py -v (inside the Linux build image)",
+    "Explicit offline integration: tests/integration/run.sh; see tests/README.md for pinned workspaces, variant selection and fresh outputs",
+    "bash tests/native/run-settings.sh /absolute/resolved/workspace /absolute/new/output normal|skip-lock (inside the Linux Zephyr build image; shared reviewed Zephyr pin)",
+    "python3 tests/check_button_overlap.py --output FRESH_OUTPUT (inside the Linux build image)"
+  ],
+  "coverage_map": "tests/contract.json",
+  "preserved_assertions": "Relocated fixtures retain their prior assertions; no snapshot auto-accept or unique assertion removal.",
+  "execution": {
+    "quick": "All host behavioral scenarios once; sanitizer variants where supported; offline-admission and coverage-validator units once.",
+    "full": "Same host scenarios plus optimization/coverage; actual kernel boundary and supported stock/DYA core compilation use separate documented entries.",
+    "outputs": "Use a fresh evidence directory; existing evidence is never overwritten.",
+    "coverage": "Every gated range requires measured executable lines; empty, metadata-only and partial reports fail. Recording-tool controls validate admission; normal full runs measure actual compiled fixture coverage."
+  },
+  "gaps": [
+    "Physical USB/BLE/split delivery, timing, power and retention require matching production-board evidence.",
+    "Native settings fixture uses actual kernel threads/mutexes with controlled registry/device/setter and one selected stale-read interleaving; persistent storage, Studio and arbitrary scheduling remain separate.",
+    "Overlapping input fixture observes processor/listener state only; arbitrary routes outside this processor and actual host HID delivery require consuming integration evidence."
+  ]
+}
