@@ -1,262 +1,50 @@
-# Copyright (c) 2026 amgskobo
 # SPDX-License-Identifier: MIT
-
-"""Exercise all production-driver scenarios in quick or full host mode.
-
-Quick runs every fixture under ASan/UBSan. Full additionally executes the
-optimized and measured coverage variants and retains the coverage gate below.
-
-Each fixture names a source file, the functions whose lines and branches it
-gates, and any further functions it only needs in order to compile. They are
-lifted out of the source, under #line markers that keep their real file and
-line numbers, into tests/runtime/<fixture>_harness.c in place of its
-/* DRIVER_FUNCTIONS */ marker. The harness supplies stand-ins for Zephyr and
-ZMK and drives the functions. Every line and branch inside a gated function
-must run, measured from gcov's per-line report rather than its per-file total,
-so a support function is compiled in without being held to it.
-
-A name may end in ":2" to lift the second of two definitions -- the other
-side of an #if -- and a name starting with "#define " lifts that macro.
-"""
-
-import pathlib
+"""Compile the complete unchanged production driver, never lifted definitions."""
+import os
+from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 
-import os
-import sys
+root=Path(__file__).resolve().parents[2]
+source=root/'drivers/input/input_processor_absolute_to_relative.c'
+core=root/'include/zmk-input-abs2rel/absolute_to_relative_core.h'
 
-mode = os.environ.get("ZMK_TEST_MODE", "quick")
-if mode not in ("quick", "full"):
-    raise SystemExit("ZMK_TEST_MODE must be quick or full")
-variants = (('optimized', ['-O2']), ('sanitized', ['-O1', '-g', '-fno-omit-frame-pointer', '-fsanitize=address,undefined', '-fno-sanitize-recover=all']), ('coverage', ['-O0', '--coverage']))
-if mode == "quick":
-    variants = tuple(v for v in variants if v[0] == "sanitized")
-
-root = pathlib.Path(__file__).resolve().parents[2]
-source_dir = root / "drivers/input"
-links = ()
-# Sources with a coverage gate of their own.
-elsewhere = ()
-fixtures = (
-    ("driver", "input_processor_absolute_to_relative.c", (
-        "encode_suppression",
-        "drop_reference",
-        "apply_generation",
-        "stream_for_event",
-        "process_axis",
-        "consume_button",
-        "handle_touch_button",
-        "handle_button_suppress",
-        "absolute_to_relative_handle_event",
-        "absolute_to_relative_init",
-        "absolute_to_relative_device_valid",
-        "absolute_to_relative_get_suppression",
-        "absolute_to_relative_set_suppression",
-        "#define ABSOLUTE_TO_RELATIVE_RESYNC",
-        "absolute_to_relative_layer_listener",
-    ), ()),
-    ("custom_settings", "input_processor_absolute_to_relative_custom_settings.c", (
-        "abs2rel_namespace_handler",
-        "read_flag",
-        "abs2rel_check_unique_keys",
-        "#define ABSOLUTE_TO_RELATIVE_APPLY",
-        "absolute_to_relative_apply_settings",
-        "absolute_to_relative_settings_event_cb",
-    ), ()),
-)
-
-
-def definition(source, name):
-    """Return (first line, last line, text) of name's definition."""
-    if name.startswith("#define "):
-        start = source.index(name)
-        end = source.index("\n\n", start) + 1
-        first = source.count("\n", 0, start) + 1
-        return first, first + source.count("\n", start, end - 1), source[start:end]
-    name, _, nth = name.partition(":")
-    skip = int(nth or 1) - 1
-    for match in re.finditer(r"\b" + name + r"\s*\(", source):
-        closing = source.find(")", match.end())
-        if not source[closing + 1:].lstrip().startswith("{"):
-            continue  # a call or a prototype
-        start = source.rfind("\n", 0, match.start()) + 1
-        if start == match.start():
-            start = source.rfind("\n", 0, start - 1) + 1  # return type on its own line
-        head = source[start:match.start()]
-        if not head or head[0].isspace() or head.startswith("#"):
-            continue  # a call inside a body or a macro
-        if skip:
-            skip -= 1
-            continue
-        end = body_end(source, source.index("{", closing))
-        first = source.count("\n", 0, start) + 1
-        return first, first + source.count("\n", start, end - 1), source[start:end]
-    raise RuntimeError(f"missing definition: {name}")
-
-
-def body_end(source, opening):
-    """Index just past the brace that closes the one at opening.
-
-    Braces inside comments and string or character literals do not count.
-    """
-    depth = 0
-    i = opening
-    while True:
-        if source.startswith("/*", i):
-            i = source.index("*/", i) + 2
-            continue
-        if source.startswith("//", i):
-            i = source.index("\n", i)
-            continue
-        char = source[i]
-        if char in "\"'":
-            i += 1
-            while source[i] != char:
-                i += 2 if source[i] == "\\" else 1
-        elif char == "{":
-            depth += 1
-        elif char == "}":
-            depth -= 1
-            if depth == 0:
-                return i + 1
-        i += 1
-
-
-def misses(gcov_text, ranges):
-    """Count lines and branches inside ranges; list what never ran."""
-    lines = executed = branches = taken = 0
-    observed = [0 for _range in ranges]
-    missed = []
-    current = None
-    for row in gcov_text.splitlines():
-        if row.startswith("branch"):
-            if current is None:
-                continue
-            branches += 1
-            if re.search(r"taken [1-9]", row):
-                taken += 1
-            else:
-                missed.append(f"  {current[1]}: {current[2].strip()}\n    {row}")
-            continue
-        found = re.match(r"\s*([^:]+):\s*(\d+):(.*)", row)
-        if not found:
-            continue
-        count, number, text = found.group(1).strip(), int(found.group(2)), found.group(3)
-        inside = any(first <= number <= last for first, last in ranges)
-        current = (count, number, text) if inside else None
-        if not inside or count == "-":
-            continue
-        lines += 1
-        for index, (first, last) in enumerate(ranges):
-            if first <= number <= last:
-                observed[index] += 1
-        if count.startswith(("#####", "=====")):
-            missed.append(f"  {number}: {text.strip()}  (never ran)")
-        else:
-            executed += 1
-    if not ranges or not lines:
-        raise RuntimeError("coverage report has no executable lines in gated functions")
-    if any(count == 0 for count in observed):
-        raise RuntimeError("coverage report has no executable lines for a gated function range")
-    return lines, executed, branches, taken, missed
-
-
-def ungated_functions():
-    """Functions defined in the sources that no fixture gates.
-
-    A file named in `elsewhere` has a gate of its own and is skipped, so a
-    function added to any other source without a test fails this run.
-    """
-    gated = {}
-    for _fixture, file_name, names, _support in fixtures:
-        gated.setdefault(file_name, set()).update(name.split(":")[0] for name in names)
-    definition_pattern = re.compile(
-        r"^(?:static\s+|__weak\s+)?(?:inline\s+)?(?:const\s+)?[a-z_0-9]+(?:\s+[a-z_0-9]+)?"
-        r"[\s*]+([a-z_0-9]+)\([^;]*?\)\s*\{", re.M)
-    missing = []
-    for path in sorted(source_dir.glob("*.c")):
-        if path.name in elsewhere:
-            continue
-        defined = set(definition_pattern.findall(path.read_text(encoding="utf-8")))
-        missing += [f"{path.name}: {name}" for name in sorted(defined - gated.get(path.name, set()))]
-    return missing
-
+def check_report(text, production):
+    expected=set(re.findall(r'^static[^;{}]+?\b(\w+)\([^;{}]*\)\s*\{', production, re.M))
+    functions={name:int(count) for name,count in re.findall(r'^function (\w+) called (\d+)',text,re.M)}
+    executable=re.findall(r'^[ \t]*([^:\r\n]+):[ \t]*([1-9]\d*):',text,re.M)
+    measured=[count.strip() for count,_ in executable if count.strip()!='-']
+    if not measured:
+        raise RuntimeError('coverage report has no executable lines')
+    if not expected or not expected.issubset(functions) or any(functions[n]==0 for n in expected):
+        raise RuntimeError('coverage report has no executable lines for a gated function')
+    branches=re.findall(r'^branch.*',text,re.M)
+    if any(c.startswith(('#####','=====')) for c in measured) or not branches or any(
+            re.search(r'taken 0(?: |$)|never executed',b) for b in branches):
+        raise RuntimeError('production line/branch was not executed')
+    return len(expected),len(measured),len(branches)
 
 def main():
-    emit_settings = None
-    emit_fixture = None
-    if len(sys.argv) != 1:
-        entries = {"--emit-custom-settings": "custom_settings", "--emit-driver": "driver"}
-        if len(sys.argv) != 3 or sys.argv[1] not in entries:
-            raise SystemExit("usage: run.py [--emit-custom-settings|--emit-driver FRESH_SOURCE]")
-        emit_fixture = entries[sys.argv[1]]
-        emit_settings = pathlib.Path(sys.argv[2])
-        if emit_settings.exists() or emit_settings.is_symlink():
-            raise FileExistsError("fresh emitted source required: " + str(emit_settings))
+    if len(sys.argv)!=1: raise SystemExit('usage: run.py (no selectors; complete driver only)')
+    mode=os.environ.get('ZMK_TEST_MODE','quick')
+    if mode not in ('quick','full'): raise SystemExit('ZMK_TEST_MODE must be quick or full')
+    variants=[('sanitized',['-O1','-g','-fno-omit-frame-pointer','-fsanitize=address,undefined','-fno-sanitize-recover=all'])]
+    if mode=='full': variants += [('optimized',['-O2']),('coverage',['-O0','--coverage'])]
+    with tempfile.TemporaryDirectory(prefix='abs2rel-driver-') as folder:
+        work=Path(folder)
+        for label,flags in variants:
+            binary=work/label
+            subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',*flags,
+                '-I'+str(root/'tests/support'),'-I'+str(root/'include'),
+                str(root/'tests/runtime/driver_harness.c'),'-o',str(binary)],check=True)
+            subprocess.run([str(binary)],check=True)
+        if mode=='full':
+            subprocess.run(['gcov','-b','-c',str(work/'coverage-driver_harness.gcno')],cwd=work,check=True,capture_output=True)
+            for path in (source,):
+                report=(work/(path.name+'.gcov')).read_text(encoding='utf-8')
+                counts=check_report(report,path.read_text(encoding='utf-8'))
+                print(path.name, 'functions/lines/branches',counts,'complete PASS')
 
-    missing_functions = ungated_functions()
-    if missing_functions:
-        raise RuntimeError("functions no fixture gates:\n  " + "\n  ".join(missing_functions))
-
-    for fixture, file_name, gated, support in fixtures:
-        if emit_settings is not None and fixture != emit_fixture:
-            continue
-        source_path = source_dir / file_name
-        source = source_path.read_text(encoding="utf-8")
-        functions = []
-        ranges = []
-        for name in (*support, *gated):
-            first, last, text = definition(source, name)
-            # gcov attributes expanded macro statements to the calling function,
-            # not the macro definition. Require measurement of each real function;
-            # keep the same macro code in those measured callers and fixtures.
-            if name in gated and not name.startswith("#"):
-                ranges.append((first, last))
-            elif name not in gated and not name.startswith("#"):
-                # A harness need not call every function it only compiles.
-                text = "__attribute__((unused)) " + text
-            functions.append(f'#line {first} "{source_path}"\n{text}')
-
-        harness_path = root / "tests/runtime" / f"{fixture}_harness.c"
-        harness = harness_path.read_text(encoding="utf-8")
-        marker = "/* DRIVER_FUNCTIONS */"
-        resume = harness.count("\n", 0, harness.index(marker)) + 2
-        if emit_settings is not None:
-            with emit_settings.open("x", encoding="utf-8") as output:
-                output.write(harness.replace(marker, "\n".join(functions) +
-                                            f'\n#line {resume} "{harness_path}"'))
-            print("Emitted owner fixture:", fixture, emit_settings)
-            raise SystemExit(0)
-        with tempfile.TemporaryDirectory(prefix=f"{fixture}-runtime-") as folder:
-            work = pathlib.Path(folder)
-            unit = work / "test.c"
-            unit.write_text(harness.replace(marker, "\n".join(functions) +
-                                            f'\n#line {resume} "{harness_path}"'), encoding="utf-8")
-            for variant, flags in variants:
-                binary = work / variant
-                subprocess.run(["cc", "-std=c11", "-Wall", "-Wextra", "-Werror", *flags,
-                                "-I" + str(root / "include"), "-I" + str(source_dir),
-                                "-I" + str(root / "tests/runtime"),
-                                str(unit), *(["-pthread"] if fixture == "custom_settings" else []),
-                                *map(str, links), "-o", str(binary)],
-                               check=True)
-                subprocess.run([str(binary)], check=True)
-            if mode == "quick":
-                print(f"{fixture}: PASS (all scenarios, ASan/UBSan)")
-                continue
-            subprocess.run(["gcov", "-b", "-c", "-o", str(work / "coverage-test.gcno"), str(unit)],
-                           cwd=work, check=True, capture_output=True, text=True)
-            report = (work / f"{file_name}.gcov").read_text(encoding="utf-8")
-            lines, executed, branches, taken, missed = misses(report, ranges)
-            count = sum(not name.startswith("#") for name in gated)
-            print(f"{fixture}: {count} functions of {file_name}: "
-                  f"lines {executed}/{lines}, branches {taken}/{branches}")
-            if missed:
-                print("\n".join(missed))
-                raise RuntimeError(f"{fixture} fell below 100% coverage")
-
-
-if __name__ == "__main__":
-    main()
+if __name__=='__main__': main()

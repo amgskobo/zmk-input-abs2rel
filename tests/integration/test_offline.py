@@ -1,8 +1,6 @@
 # Copyright (c) 2026 amgskobo
 # SPDX-License-Identifier: MIT
 import importlib.util
-import io
-import tarfile
 from pathlib import Path
 import tempfile
 import shutil
@@ -15,11 +13,6 @@ offline = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(offline)
 if os.environ.get("ZMK_TEST_OFFLINE_NEGATIVE_CONTROL") == "skip-identity":
     offline.identity = lambda path, expected: expected
-if os.environ.get("ZMK_TEST_OFFLINE_NEGATIVE_CONTROL") == "skip-archive-digest":
-    class _UncheckedDigest:
-        def hexdigest(self):
-            return offline.CUSTOM_ARCHIVE
-    offline.hashlib.sha256 = lambda data: _UncheckedDigest()
 
 class OfflineAdmission(unittest.TestCase):
     def setUp(self):
@@ -157,26 +150,10 @@ class OfflineAdmission(unittest.TestCase):
                 self.assertFalse(self.output.exists())
                 self.assertEqual(list(outer.iterdir()), [])
 
-    def test_custom_settings_requires_exact_archive(self):
+    def test_unowned_settings_manifest_is_rejected(self):
         self.manifest.write_text("zmk-feature-custom-settings\n")
-        with patch.dict(offline.os.environ, {"ZMK_TEST_CUSTOM_SETTINGS_ARCHIVE": str(self.root / "missing")}):
-            with self.assertRaisesRegex(ValueError, "pinned custom-settings"):
-                self.prepare()
-        self.assertFalse(self.output.exists())
-
-    def test_existing_custom_settings_archive_with_wrong_digest_is_rejected(self):
-        self.manifest.write_text("zmk-feature-custom-settings\n")
-        archive = self.root / "wrong-archive.tar"
-        # Keep the archive parseable: bypassing the digest must reach the
-        # missing-rejection assertion, not an unrelated tar parser error.
-        payload = b"controlled wrong dependency content\n"
-        with tarfile.open(archive, "w") as bundle:
-            member = tarfile.TarInfo("README.md")
-            member.size = len(payload)
-            bundle.addfile(member, io.BytesIO(payload))
-        with patch.dict(offline.os.environ, {"ZMK_TEST_CUSTOM_SETTINGS_ARCHIVE": str(archive)}):
-            with self.assertRaisesRegex(ValueError, "pinned custom-settings"):
-                self.prepare()
+        with self.assertRaisesRegex(ValueError,"pure converter fixture"):
+            self.prepare()
         self.assertFalse(self.output.exists())
 
 if __name__ == "__main__":

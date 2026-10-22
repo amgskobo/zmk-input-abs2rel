@@ -31,8 +31,8 @@ Dependency instructions apply to their interfaces and work in their checkout;
 they do not authorize unrelated edits, commits, pushes or PR creation. Apply
 the instruction hierarchy and the user's current scope; report real conflicts.
 
-For the custom-settings variant, inspect `zmk-feature-custom-settings` and
-its DYA Studio RPC dependency; keep the upstream variant independent.
+The pure converter has no settings adapter. Both supported-core fixtures use
+that same conversion contract; no Custom Settings dependency is selected.
 
 Hardware-independent host/protocol and native/compile checks may run
 independently. Host mocks do not prove real scheduling, electrical timing or
@@ -50,7 +50,8 @@ for prose changes. Report checks actually run separately from pending gates.
 ## Module scope and checks
 
 This repository owns absolute-to-relative conversion, per-input history,
-contact transitions and its custom-settings bridge.
+reference resets and transparent source events. Suppression, button disposition
+and settings compatibility are outside this owner.
 
 Run `bash tests/run-docker.sh` for all behavioral cases under ASan/UBSan.
 Use `ZMK_TEST_MODE=full bash tests/run-docker.sh` for retained coverage/ABI

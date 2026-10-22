@@ -11,17 +11,17 @@
     },
     {
       "fixture": "tests/runtime/driver_harness.c",
-      "asserts": "Independent histories, contact reset, suppression, generation changes and numeric-only state-transition logs without runtime device labels or no-op repeats; touch release survives enabling suppression after a forwarded press on both streams; consumed press/repeat/release pairs, disabling, generation resets, sync boundaries and independent listener records; 48 repeat/policy/generation cases retain release ownership for both button kinds/listeners, four nonzero values, no reset/before-repeat/mid-repeat reset; discarded new presses never earn forwarding credit; 24 overlapping button/listener scenarios assert each ordered edge, both release orders, retained second release across generation changes and post-release retirement"
+      "asserts": "Whole unchanged production driver/structs/API: independent axes/sources, real injected generation changes, transparent source edges, stale payload cancellation, reset/init and original sync"
     },
     {
-      "fixture": "tests/runtime/custom_settings_harness.c",
-      "asserts": "Settings read/type failures, paired application, collision detection without device-specific keys, and latest registry callback precedence across an older paused read; same owner fixture runs host stand-ins or real Zephyr mutex/thread boundary"
+      "fixture": "tests/native/module/main.c",
+      "asserts": "Actual driver API plus real ZMK layer event dispatch; ordered per-source/axis samples and transparent buttons, 3 repeats per supported core"
     }
   ],
-  "limits": "Host stand-ins and controlled native registry/device/setter do not prove persistent storage, arbitrary interleavings, Studio or split/physical delivery. Native execution separately exercises actual kernel mutexes and threads.",
+  "limits": "Conversion boundary/compile evidence only; button/frame/settings assertions moved to zmk-input-suppress; no physical acceptance.",
   "execution": {
     "default": "quick: every host behavioral fixture and scenario under ASan/UBSan once; offline-admission and coverage-validator units once",
-    "full": "ZMK_TEST_MODE=full: same host scenarios plus optimized, coverage and existing 32-bit variants; native and supported-core integration use separate entries",
+    "full": "Same host cases under sanitizers/optimization and complete arithmetic/driver line/branch coverage; supported-core ARM/native entries remain separate",
     "integration": "owner native/DTS/API guards when interfaces or kernel contracts change; not a prerequisite for pure host behavior",
     "transport": "actual ordered USB/BLE/split/power/reset evidence; archived simulation is not a passing substitute"
   },
@@ -29,26 +29,15 @@
     "fixtures": [
       {
         "fixture": "tests/integration/test_offline.py",
-        "asserts": "Exact supported core/dependency pins, clean sources, missing inputs, safe nonoverlapping project paths, west/config metadata separation, fresh outputs outside original workspace/dependency roots including symlink aliases, and pinned custom-settings archive; identity bypass negative control"
-      },
-      {
-        "fixture": "tests/check_button_overlap.py",
-        "asserts": "Same emitted owner fixture:24 normal overlapping scenarios pass; test-only shared button history fails exact ownership assertion; emission rejects existing files, symlink aliases and unknown selectors without modifying source"
+        "asserts": "Supported clean dependency pins, missing inputs, safe project/output/symlink layout and fresh outputs; reject unowned settings fixture selection"
       },
       {
         "fixture": "tests/test_runtime_coverage.py",
-        "asserts": "Actual full runtime entry rejects empty, unrelated and partially missing gcov reports with recording compiler/gcov tools; each gated range requires executable lines; valid counts and unexecuted line/branch failures retained"
+        "asserts": "Complete-driver entry rejects empty/unrelated/missing-function/unexecuted line/branch reports and invalid mode/retired selectors"
       }
     ],
     "entry": "tests/integration/run.sh",
     "preparation": "Explicit pinned offline workspace; local unchanged ZMK clone and original fixture manifest; no fetch or source repair",
     "limits": "Admission tests control dependency responses. Actual native/API/firmware fixtures separately verify unchanged stock ZMK and DYA. Physical transport remains separate."
-  },
-  "kernel": {
-    "entry": "tests/native/run-settings.sh WORKSPACE FRESH_OUTPUT normal|skip-lock",
-    "fixture": "tests/runtime/custom_settings_harness.c",
-    "asserts": "Actual Zephyr mutex contention serializes an older paused read before a newer callback, leaving the newer pair applied; same binary repeats three times; test-only lock bypass must fail the exact stale-value assertion three times",
-    "pin": "10ba6d0cb38bc3d258775d27982f707599320085",
-    "limits": "Controlled registry, device and setter; no persistence, Studio, physical transport or exhaustive scheduling claim"
   }
 }

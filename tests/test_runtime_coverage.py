@@ -39,9 +39,7 @@ class RuntimeCoverageAdmission(unittest.TestCase):
                     text = "" if kind == "empty" else "1:0:unrelated metadata\\n"
                     source_root = pathlib.Path(os.environ["CONTROLLED_OWNER_ROOT"], "drivers/input")
                     if kind == "missing-range":
-                        source = (source_root / "input_processor_absolute_to_relative.c").read_text()
-                        line = source[:source.index("static atomic_val_t encode_suppression")].count("\\n") + 2
-                        text = "1:" + str(line) + ":one gated function only\\n"
+                        text = "function drop_reference called 1\\n1:24:one gated function only\\n"
                     for source in source_root.glob("*.c"):
                         pathlib.Path(source.name + ".gcov").write_text(text)
                     '''), encoding='utf-8')
@@ -57,28 +55,33 @@ class RuntimeCoverageAdmission(unittest.TestCase):
                                     'synthetic noncoverage report falsely passed: ' + result.stdout)
                 self.assertIn('coverage report has no executable lines', result.stderr)
                 if kind == 'missing-range':
-                    self.assertIn('a gated function range', result.stderr)
+                    self.assertIn('a gated function', result.stderr)
                 calls = (work / 'compiler.jsonl').read_text(encoding='utf-8').splitlines()
                 self.assertGreater(len(calls), 0)
                 self.assertTrue(all(isinstance(json.loads(row), list) for row in calls))
 
 
-    def test_each_gated_range_requires_measured_lines(self):
+    def test_each_production_function_and_branch_is_required(self):
         import importlib.util
-        runner = Path(__file__).resolve().parent / 'runtime/run.py'
-        spec = importlib.util.spec_from_file_location('abs2rel_runtime_coverage', runner)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        complete = '1:10:first\nbranch 0 taken 1\n2:20:second\n'
-        self.assertEqual(module.misses(complete, [(10, 10), (20, 20)]),
-                         (2, 2, 1, 1, []))
-        with self.assertRaisesRegex(RuntimeError, 'a gated function range'):
-            module.misses('1:10:first\n', [(10, 10), (20, 20)])
-        with self.assertRaisesRegex(RuntimeError, 'no executable lines'):
-            module.misses(complete, [])
-        missed = module.misses('#####:10:first\nbranch 0 never executed\n', [(10, 10)])
-        self.assertEqual(missed[:4], (1, 0, 1, 0))
-        self.assertEqual(len(missed[4]), 2)
+        runner=Path(__file__).resolve().parent/'runtime/run.py'
+        spec=importlib.util.spec_from_file_location('coverage',runner)
+        module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        source='static int first(void) { return 1; }\nstatic int second(void) { return 2; }'
+        complete='function first called 1\n1:10:first\nbranch 0 taken 1\nfunction second called 1\n2:20:second\n'
+        self.assertEqual(module.check_report(complete,source),(2,2,1))
+        with self.assertRaisesRegex(RuntimeError,'a gated function'):
+            module.check_report('function first called 1\n1:10:first\n',source)
+        with self.assertRaisesRegex(RuntimeError,'no executable lines'):
+            module.check_report('function first called 1\n',source)
+        for text in [complete.replace('1:10','#####:10'),complete.replace('taken 1','taken 0'),complete.replace('taken 1','never executed'),complete.replace('second called 1','second called 0')]:
+            with self.subTest(report=text),self.assertRaises(RuntimeError): module.check_report(text,source)
+
+    def test_invalid_mode_and_removed_selectors_fail(self):
+        runner=Path(__file__).resolve().parent/'runtime/run.py'
+        result=subprocess.run([sys.executable,str(runner),'--emit-driver','unused'],capture_output=True,text=True)
+        self.assertNotEqual(result.returncode,0)
+        result=subprocess.run([sys.executable,str(runner)],env=dict(os.environ,ZMK_TEST_MODE='invalid'),capture_output=True,text=True)
+        self.assertNotEqual(result.returncode,0)
 
 
 if __name__ == '__main__':

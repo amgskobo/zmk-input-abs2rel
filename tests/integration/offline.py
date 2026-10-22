@@ -2,14 +2,11 @@
 # Copyright (c) 2026 amgskobo
 # SPDX-License-Identifier: MIT
 """Prepare an isolated, pinned workspace from already resolved read-only sources."""
-import hashlib
 import json
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
-import tarfile
 
 CORES = {"upstream": "5b51501fead672c41b5cfb396f3dafe0894bf4e9",
          "dya": "e5c9b6915b56801193e359dd9bad4a167ce0d1b8"}
@@ -19,7 +16,6 @@ PINS = {"zephyr": "10ba6d0cb38bc3d258775d27982f707599320085",
         "nanopb": "7307ce399b81ddcb3c3a5dc862c52d4754328d38"}
 STUDIO = {"upstream": "6cb4c283e76209d59c45fbcb218800cd19e9339d",
           "dya": "89b81d2e587fce807b668dff2a6967a40beef421"}
-CUSTOM_ARCHIVE = "3e815475a9756ef1b69d5352bc5d0284fec2b4cf20e1c402a474978010e83ff1"
 
 def run(*args, cwd=None):
     return subprocess.check_output(args, cwd=cwd, text=True).strip()
@@ -88,12 +84,8 @@ def prepare(source, variant, manifest, output):
         if name not in projects:
             raise ValueError(f"missing required dependency: {name}")
         identities[name] = {"path": str(projects[name][1]), "revision": identity(projects[name][1], pin)}
-    custom = "zmk-feature-custom-settings" in manifest.read_text()
-    archive = None
-    if custom:
-        archive = Path(os.environ.get("ZMK_TEST_CUSTOM_SETTINGS_ARCHIVE", ""))
-        if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != CUSTOM_ARCHIVE:
-            raise ValueError("provide the pinned custom-settings c6a7fef archive via ZMK_TEST_CUSTOM_SETTINGS_ARCHIVE")
+    if "zmk-feature-custom-settings" in manifest.read_text():
+        raise ValueError("pure converter fixture does not select custom-settings")
     # Atomic admission: an existing output is never reused, including races.
     output.mkdir(parents=True, exist_ok=False)
     workspace = output / "workspace"
@@ -110,12 +102,6 @@ def prepare(source, variant, manifest, output):
             export_core(path, target)
         else:
             target.symlink_to(path, target_is_directory=True)
-    if archive is not None:
-        target = workspace / "zmk-feature-custom-settings"
-        target.mkdir()
-        with tarfile.open(archive) as bundle:
-            bundle.extractall(target, filter="data")
-        identities["zmk-feature-custom-settings"] = {"revision": "c6a7fef3a3be3d3ace5de9a4b0628c6418cd1f3f", "archive_sha256": CUSTOM_ARCHIVE}
     (output / "dependencies.json").write_text(json.dumps({"variant": variant, "manifest": str(manifest), "projects": identities}, indent=2) + "\n")
     return workspace
 
