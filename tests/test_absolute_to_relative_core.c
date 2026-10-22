@@ -29,6 +29,16 @@ static void test_first_sample_and_reset(void) {
     absolute_to_relative_axis_reset(&state);
     assert(!absolute_to_relative_axis_apply(&state, 900, &relative));
     assert(apply(&state, 890) == -5);
+
+    /* A reset forgets the history, not only the seed flag. */
+    absolute_to_relative_axis_reset(&state);
+    assert(state.previous_position == 0 && state.previous_delta == 0 && !state.initialized);
+
+    /* A first sample drops whatever delta was left behind, however it got
+     * there, so the second sample is not averaged with it. */
+    state.previous_delta = 100;
+    assert(!absolute_to_relative_axis_apply(&state, 5, &relative));
+    assert(apply(&state, 15) == 5);
 }
 
 static void test_symmetric_rounding(void) {
