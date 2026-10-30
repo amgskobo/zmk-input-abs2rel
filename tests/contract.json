@@ -39,5 +39,11 @@
     "entry": "tests/integration/run.sh",
     "preparation": "Explicit pinned offline workspace; local unchanged ZMK clone and original fixture manifest; no fetch or source repair",
     "limits": "Admission tests control dependency responses. Actual native/API/firmware fixtures separately verify unchanged stock ZMK and DYA. Physical transport remains separate."
+  },
+  "integer_width": {
+    "production": "32-bit arithmetic; independent wider oracles remain test-only",
+    "contract": "Coordinate subtraction uses checked 32-bit saturation. The two-sample average splits each operand into quotient/remainder and applies one signed truncation, preserving the full int32 coordinate contract without a wide sum.",
+    "fixtures": "test_absolute_to_relative_core.c retains full-range saturation and independent histories; the signed-average grid compares every small positive/negative pair with an independent wide reference.",
+    "physical": "NOT RUN"
   }
 }

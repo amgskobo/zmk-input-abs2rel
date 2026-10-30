@@ -80,3 +80,9 @@ modules cannot supply missing dependencies. The canonical host entry runs
 `integration/test_workspace_env.py`, including failed-discovery/empty-list
 regressions and a symlinked cache with paths containing spaces. The native entry
 uses the same selection helper. This validates dependency selection, not hardware.
+
+## 32-bit arithmetic and clock contract
+
+Coordinate subtraction uses checked 32-bit saturation. The two-sample average splits each operand into quotient/remainder and applies one signed truncation, preserving the full int32 coordinate contract without a wide sum.
+
+test_absolute_to_relative_core.c retains full-range saturation and independent histories; the signed-average grid compares every small positive/negative pair with an independent wide reference.

@@ -26,5 +26,11 @@
     "Native is actual driver API/layer dispatch, not input-queue or physical HID evidence.",
     "Suppression/frame/HID-pair/settings contracts are outside this pure converter; see tests/README.md."
   ],
-  "suppression_extraction": "Source buttons are transparent. Final disposition/frame assertions belong to zmk-input-suppress and explicit composition fixtures; current map in tests/README.md."
+  "suppression_extraction": "Source buttons are transparent. Final disposition/frame assertions belong to zmk-input-suppress and explicit composition fixtures; current map in tests/README.md.",
+  "integer_width": {
+    "production": "32-bit arithmetic; independent wider oracles remain test-only",
+    "contract": "Coordinate subtraction uses checked 32-bit saturation. The two-sample average splits each operand into quotient/remainder and applies one signed truncation, preserving the full int32 coordinate contract without a wide sum.",
+    "fixtures": "test_absolute_to_relative_core.c retains full-range saturation and independent histories; the signed-average grid compares every small positive/negative pair with an independent wide reference.",
+    "physical": "NOT RUN"
+  }
 }

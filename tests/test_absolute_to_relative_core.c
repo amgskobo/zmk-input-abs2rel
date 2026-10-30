@@ -84,11 +84,23 @@ static void test_independent_streams(void) {
     assert(apply(&right, 880) == -10);
 }
 
+static void test_signed_average_grid(void) {
+    for (int32_t delta = -33; delta <= 33; delta++) {
+        for (int32_t previous = -33; previous <= 33; previous++) {
+            struct absolute_to_relative_axis_state state = {
+                .initialized = true, .previous_position = 0, .previous_delta = previous,
+            };
+            assert(apply(&state, delta) == (int32_t)(((int64_t)delta + previous) / 2));
+        }
+    }
+}
+
 int main(void) {
     test_first_sample_and_reset();
     test_symmetric_rounding();
     test_full_int32_coordinate_range();
     test_independent_streams();
+    test_signed_average_grid();
     puts("absolute-to-relative core tests: PASS");
     return 0;
 }

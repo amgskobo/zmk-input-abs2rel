@@ -90,7 +90,9 @@ smooth = (current_delta + previous_delta) / 2
 The halving divides rather than shifts, because a shift rounds towards minus
 infinity and would make the same path measure longer travelled one way than the
 other. The first sample on each axis establishes the reference point and
-produces no event; smoothing begins on the second.
+produces no relative movement. The driver substitutes a neutral `MSC_SCAN`
+event while preserving the original sync boundary; smoothing begins on the
+second sample.
 
 ### Reference point and layer changes
 
@@ -119,3 +121,10 @@ The conversion core preserves the full signed `int32_t` range used by Zephyr
 input events. Differences wider than that range are saturated before smoothing
 instead of wrapping. The output remains an `int32_t` relative event for the
 processors and listener downstream.
+
+Coordinate subtraction uses checked 32-bit saturation. The two-sample average
+splits each operand into quotient and remainder, then applies one signed
+truncation toward zero. This preserves the full coordinate range without a wide
+sum. The [core tests](tests/test_absolute_to_relative_core.c) compare signed
+averages and extreme differences with an independent wide reference and retain
+independent-listener history checks.
