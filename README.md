@@ -13,7 +13,7 @@ It does not own host button policy, button disposition or saved suppression sett
 };
 ```
 
-`input_suppress` is the standard `zmk-input-suppress` instance. Put
+`input_suppress` is the standard [`zmk-input-suppress`](https://github.com/amgskobo/zmk-input-suppress) instance. Put
 the same final instance on every route, after conversion, mapping/scaling and
 other selected stages. Scroll uses this converter followed by wheel mapping
 and a final suppression mask. The module does not require the final filter
@@ -59,7 +59,7 @@ Run `bash tests/run-docker.sh`; use `ZMK_TEST_MODE=full` for retained optimized,
 coverage and ABI variants. [tests/README.md](tests/README.md) documents supported
 stock/DYA firmware fixtures and actual dependency requirements. Conversion,
 independent histories, contact/layer/generation resets and source-edge transparency
-remain here. Final button/frame tests moved to `zmk-input-suppress`.
+remain here. Final button/frame tests moved to [`zmk-input-suppress`](https://github.com/amgskobo/zmk-input-suppress).
 Host/native/compile results do not establish physical HID/BLE/split delivery,
 settings persistence, timing or power acceptance.
 
@@ -75,7 +75,6 @@ manifest:
       remote: amgskobo
       revision: main
 ```
-
 
 ## How it works
 

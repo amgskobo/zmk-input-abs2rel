@@ -6,7 +6,7 @@
 
 ## 共通最終段とのセット構成
 
-ホスト向けの抑止は、別の `zmk-input-suppress` が所有します。すべての経路の末尾に
+ホスト向けの抑止は、別の [`zmk-input-suppress`](https://github.com/amgskobo/zmk-input-suppress) が所有します。すべての経路の末尾に
 同じ抑止器を置き、scroll も同じ converter と wheel mapper、末尾の抑止マスク を使います。
 標準で有効なのは `zip_absolute_to_relative` だけです。pointerとscrollで同じconverterを使います。
 旧 `zip_absolute_to_relative_scroll` は独立履歴のインスタンスとして残しますが、既定では無効です。
@@ -37,7 +37,6 @@ manifest:
       remote: amgskobo
       revision: main
 ```
-
 
 ## 動作
 
