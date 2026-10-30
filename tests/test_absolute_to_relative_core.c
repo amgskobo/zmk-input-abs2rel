@@ -29,6 +29,16 @@ static void test_first_sample_and_reset(void) {
     absolute_to_relative_axis_reset(&state);
     assert(!absolute_to_relative_axis_apply(&state, 900, &relative));
     assert(apply(&state, 890) == -5);
+
+    /* A reset forgets the history, not only the seed flag. */
+    absolute_to_relative_axis_reset(&state);
+    assert(state.previous_position == 0 && state.previous_delta == 0 && !state.initialized);
+
+    /* A first sample drops whatever delta was left behind, however it got
+     * there, so the second sample is not averaged with it. */
+    state.previous_delta = 100;
+    assert(!absolute_to_relative_axis_apply(&state, 5, &relative));
+    assert(apply(&state, 15) == 5);
 }
 
 static void test_symmetric_rounding(void) {
@@ -74,11 +84,23 @@ static void test_independent_streams(void) {
     assert(apply(&right, 880) == -10);
 }
 
+static void test_signed_average_grid(void) {
+    for (int32_t delta = -33; delta <= 33; delta++) {
+        for (int32_t previous = -33; previous <= 33; previous++) {
+            struct absolute_to_relative_axis_state state = {
+                .initialized = true, .previous_position = 0, .previous_delta = previous,
+            };
+            assert(apply(&state, delta) == (int32_t)(((int64_t)delta + previous) / 2));
+        }
+    }
+}
+
 int main(void) {
     test_first_sample_and_reset();
     test_symmetric_rounding();
     test_full_int32_coordinate_range();
     test_independent_streams();
+    test_signed_average_grid();
     puts("absolute-to-relative core tests: PASS");
     return 0;
 }

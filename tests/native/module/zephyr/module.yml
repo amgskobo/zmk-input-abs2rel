@@ -1,0 +1,4 @@
+name: abs2rel-native-contract
+build:
+  cmake: .
+  kconfig: Kconfig

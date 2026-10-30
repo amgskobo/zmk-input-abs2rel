@@ -1,28 +1,14 @@
-/*
- * Copyright (c) 2026 amgskobo
- * SPDX-License-Identifier: MIT
- */
-
+/* SPDX-License-Identifier: MIT */
 / {
-    /* Keep the reference label stable; the short node name is the persisted
-     * custom-settings key prefix. */
     zip_absolute_to_relative: abs_rel {
         status = "okay";
         compatible = "zmk,input-processor-absolute-to-relative";
         #input-processor-cells = <0>;
-        /* BTN_TOUCH is converter state, not a host mouse button. */
-        suppress-btn-touch;
-        /* Optional: consume INPUT_BTN_0 when the trackpad reports a click. */
-        // suppress-btn0;
     };
-
-    /* Standard scroll route: neither contact nor a click reaches the host. */
+    /* Optional legacy instance: enable explicitly only for separate history. */
     zip_absolute_to_relative_scroll: abs_rel_scroll {
-        status = "okay";
+        status = "disabled";
         compatible = "zmk,input-processor-absolute-to-relative";
         #input-processor-cells = <0>;
-        suppress-btn-touch;
-        suppress-btn0;
     };
-
 };

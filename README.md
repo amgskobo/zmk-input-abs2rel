@@ -1,28 +1,67 @@
-# ZMK Absolute-to-Relative Input Processor
+# zmk-input-abs2rel
 
-[![Test](https://github.com/amgskobo/zmk-input-abs2rel/actions/workflows/test.yml/badge.svg)](https://github.com/amgskobo/zmk-input-abs2rel/actions/workflows/test.yml)
+A small ZMK absolute-to-relative coordinate converter. It owns per-listener
+X/Y references, signed deltas, smoothing/rounding and reference reset on touch
+or layer changes. It forwards original button type/code/value/sync unchanged.
+It does not own host button policy, button disposition or saved suppression settings.
 
-[日本語](README_JA.md)
+```dts
+#include <behaviors/input_processor_absolute_to_relative.dtsi>
+#include <zmk-input-suppress/input_processor_suppress.dtsi>
+&trackpad_listener {
+    input-processors = <&zip_absolute_to_relative>, <&input_suppress (SUPPRESS_TOUCH | SUPPRESS_ABS)>;
+};
+```
 
-Converts absolute pointer coordinates into relative motion, smoothed over two
-samples. For trackpads and touch sensors that report where the finger *is*,
-feeding a pointer stack that wants to know how far it *moved*.
+`input_suppress` is the standard [`zmk-input-suppress`](https://github.com/amgskobo/zmk-input-suppress) instance. Put
+the same final instance on every route, after conversion, mapping/scaling and
+other selected stages. Scroll uses this converter followed by wheel mapping
+and a final suppression mask. The module does not require the final filter
+to compile; a complete pointing application must define its output policy.
 
-## Why this is its own module
+The standard include enables only `zip_absolute_to_relative`. Pointer and scroll
+routes can use this same per-source converter; layer changes reset its references.
+The legacy `zip_absolute_to_relative_scroll` node remains an independent instance
+but now defaults to disabled, avoiding unused history storage. Existing consumers
+that actually require a separate instance must opt in explicitly:
 
-It is an original, not a replacement. ZMK ships its own input processors —
-scaler, transform, code-mapper, temp-layer and others — and
-[zmk-input-processors](https://github.com/amgskobo/zmk-input-processors) holds
-runtime-configurable versions of four of them, each named `runtime-*` so a chain
-shows at a glance which stages can be changed while the keyboard runs.
+```dts
+&zip_absolute_to_relative_scroll { status = "okay"; };
+```
 
-This has no upstream counterpart, so the prefix would say nothing about it, and
-it kept its plain name as a documented exception. That exception was the
-symptom: it belongs with the other originals —
-[vector-acceleration](https://github.com/amgskobo/zmk-input-vector-acceleration),
-[inertia](https://github.com/amgskobo/zmk-input-inertia),
-[padstick](https://github.com/amgskobo/zmk-input-padstick) — each in a module
-of its own.
+The old label implies no button policy. Change a former legacy route to the shared
+converter, or enable the legacy node when migrating. This changes its default
+status, while preserving independent history when enabled.
+Instances have independent history per listener; a route change resets
+references through the layer event subscription. An initial reference emits a
+neutral MSC_SCAN marker preserving sync so the final stage can close pending
+motion. A stale coordinate generation is neutralized; original button edges
+remain available to the final owner, including release during a reset.
+
+## Migration from combined conversion/suppression
+
+Remove `suppress-btn-touch` and `suppress-btn0` from converter nodes.
+Remove calls to the former suppression API and remove
+`CONFIG_ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS`. Set masks directly on each route's
+final processor. The minimal final module has no profile registry, layer watcher
+or legacy settings adapter. Saved `amgskobo__a2r` flags remain in storage but are
+not loaded or applied; Studio suppression controls are unavailable. No settings
+erase is required. Base conversion supports unchanged stock ZMK and DYA.
+
+The final filter uses positive presses and zero/negative releases, matching the
+listener. It latches disposition until release and consumes unmatched releases.
+These are explicit changes from a converter which observed only selected routes.
+See [the owner test guide](tests/README.md#ownership-and-compatibility).
+
+## Tests and limits
+
+Run `bash tests/run-docker.sh`; use `ZMK_TEST_MODE=full` for retained optimized,
+coverage and ABI variants. [tests/README.md](tests/README.md) documents supported
+stock/DYA firmware fixtures and actual dependency requirements. Conversion,
+independent histories, contact/layer/generation resets and source-edge transparency
+remain here. Final button/frame tests moved to [`zmk-input-suppress`](https://github.com/amgskobo/zmk-input-suppress).
+Host/native/compile results do not establish physical HID/BLE/split delivery,
+settings persistence, timing or power acceptance.
 
 ## Installation
 
@@ -37,80 +76,6 @@ manifest:
       revision: main
 ```
 
-## Usage
-
-```dts
-#include <behaviors/input_processor_absolute_to_relative.dtsi>
-
-&trackpad_listener {
-    input-processors = <&zip_absolute_to_relative>;
-};
-```
-
-Or declare the node yourself when another suppression policy is needed, or
-when the name matters — it is the settings key (see below):
-
-```dts
-pointer_abs_rel: pointer_abs_rel {
-    compatible = "zmk,input-processor-absolute-to-relative";
-    #input-processor-cells = <0>;
-};
-```
-
-`INPUT_BTN_TOUCH` suppression defaults to true, including on a manually
-declared node. The explicit property remains accepted so existing overlays and
-overlays that want to document the policy keep building.
-
-Devicetree boolean properties express `true` by being present; they cannot
-carry a `false` value. Therefore a build without runtime custom settings always
-suppresses `BTN_TOUCH`. Enable the custom-settings option below when the flag
-must be switchable to `false`.
-
-### Standard nodes
-
-The module supplies two standard nodes. Each node keeps independent conversion
-state for every ZMK input listener, so local and split-proxied devices can share
-the same reference safely:
-
-| Reference | Node name | Button handling |
-| :--- | :--- | :--- |
-| `zip_absolute_to_relative` | `abs_rel` | suppresses `BTN_TOUCH`; preserves `BTN_0` clicks |
-| `zip_absolute_to_relative_scroll` | `abs_rel_scroll` | suppresses both `BTN_TOUCH` and `BTN_0` for scrolling |
-
-State belongs to the pair of processor node and `input_device_index`. ZMK passes
-the input listener's instance index, so two listeners using the same node keep
-separate reference positions, smoothing history and suppressed-button records.
-Settings still belong to the node and are shared by those listeners. Declare an
-additional short-named instance only when a different button policy or a
-separately adjustable settings entry is required.
-
-### Configuration Reference
-
-| Property | Type | Default | Description |
-| :--- | :--- | :--- | :--- |
-| `suppress-btn-touch` | bool | true | Consume `INPUT_BTN_TOUCH` after using it to drop the reference point, so it does not reach the mouse HID as button 0. |
-| `suppress-btn0` | bool | false | Consume `INPUT_BTN_0` when the trackpad reports a physical click. |
-
-Both are runtime values when the settings option below is on — they decide
-whether a pad's physical click reaches the host at all, which is the kind of
-thing that wants trying rather than deciding. On a pad that also carries
-tap-to-click, one setting is a duplicate button and the other is a missing one,
-and which is which depends on the pad.
-
-When runtime settings turn `suppress-btn-touch` off, each forwarded touch edge
-is made a synchronization boundary of its own. This is necessary because the
-first coordinates after an edge establish a new reference and are consumed;
-without a separate boundary a release could remain queued with no later event
-to send it, leaving mouse button 0 held at the host.
-
-Turning `suppress-btn0` off does not release a press already swallowed: that
-press's release still passes through, for the same reason it does across a
-layer change. `suppress-btn0` never drops a `BTN_0` release whose press was not
-suppressed here. Passing a release through is always safe — the press it belongs
-to already reached the host — while dropping one would leave the button held
-down with nothing left to release it. That record is cleared on a layer change
-too.
-
 ## How it works
 
 ### Smoothing
@@ -124,7 +89,9 @@ smooth = (current_delta + previous_delta) / 2
 The halving divides rather than shifts, because a shift rounds towards minus
 infinity and would make the same path measure longer travelled one way than the
 other. The first sample on each axis establishes the reference point and
-produces no event; smoothing begins on the second.
+produces no relative movement. The driver substitutes a neutral `MSC_SCAN`
+event while preserving the original sync boundary; smoothing begins on the
+second sample.
 
 ### Reference point and layer changes
 
@@ -154,84 +121,9 @@ input events. Differences wider than that range are saturated before smoothing
 instead of wrapping. The output remains an `int32_t` relative event for the
 processors and listener downstream.
 
-## Changing the flags at runtime
-
-`CONFIG_ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS=y` publishes both flags through
-[zmk-feature-custom-settings](https://github.com/cormoran/zmk-feature-custom-settings),
-so a Studio client lists and edits them with no page of its own, under the
-`amgskobo__a2r` subsystem.
-
-A key is the owning node's devicetree name, then the field:
-
-```
-abs_rel.suppress_btn_touch
-abs_rel_scroll.suppress_btn0
-```
-
-The node name is the one identifier both halves of the problem already hold: a
-view drawing the chain walks devicetree for the processors in each listener and
-gets a `const struct device *` per stage, whose `->name` is `DEVICE_DT_NAME()`,
-which is `DT_NODE_FULL_NAME()` — the same string the key is built from. So a
-stage's settings are exactly the keys starting with its device name, with
-nothing registered, agreed between modules, or typed into devicetree.
-
-### Name length limit
-
-The longest field is `suppress_btn_touch` at 18 characters. Its complete
-persisted name leaves the node **14 characters**: the 48-byte RPC key limit is
-not enough on its own because Zephyr also stores
-`custom_settings/<subsystem>/<key>` in a 64-byte name. A name that overruns
-either limit fails the build, by name.
-
-The option needs the patched ZMK that carries the custom Studio RPC protocol,
-which is why it depends on `ZMK_CUSTOM_SETTINGS_STUDIO_RPC` rather than on the
-registry alone: registering a subsystem includes `zmk/studio/custom.h`, which
-pulls a nanopb-generated header that only exists when that RPC is built.
-
-**With the option off, which is the default, none of it is compiled and the
-devicetree values are fixed.** The processor itself has no dependency on any of
-it — it builds and runs on upstream ZMK with no other module present.
-
-## Project Structure
-
-```
-.
-├── CMakeLists.txt
-├── Kconfig
-├── drivers/input/
-│   ├── input_processor_absolute_to_relative.c
-│   └── input_processor_absolute_to_relative_custom_settings.c   # only this needs the patched ZMK
-├── include/zmk-input-abs2rel/
-│   ├── absolute_to_relative_core.h              # dependency-free conversion core
-│   ├── absolute_to_relative.h                   # runtime API
-│   └── custom_settings.h                        # namespace and key shape
-├── tests/
-│   ├── integration/                              # upstream and DYA firmware fixtures
-│   ├── run-integration-docker.sh
-│   ├── run.sh
-│   └── test_absolute_to_relative_core.c
-├── dts/
-│   ├── behaviors/input_processor_absolute_to_relative.dtsi
-│   └── bindings/zmk,input-processor-absolute-to-relative.yaml
-└── zephyr/module.yml
-```
-
-## Tests
-
-`tests/run.sh` compiles the production conversion core with strict warnings,
-then runs it in optimized and AddressSanitizer/UndefinedBehaviorSanitizer
-builds. It covers first-sample seeding, reset, symmetric negative rounding,
-the full `int32_t` coordinate range and independent streams.
-
-GitHub Actions also builds `tests/integration` against both upstream ZMK with
-custom settings disabled and the DYA fork with custom settings enabled. The
-fixtures exercise the module metadata, Kconfig, Devicetree binding, CMake
-integration, two listeners sharing one processor, and the omitted
-`suppress-btn-touch` property on a real firmware target. The DYA build
-additionally verifies that the subsystem and representative settings keys are
-linked into the firmware. All checks run for every pull request and for pushes
-to `main`, and may be started manually.
-
-## License
-
-[MIT](LICENSE)
+Coordinate subtraction uses checked 32-bit saturation. The two-sample average
+splits each operand into quotient and remainder, then applies one signed
+truncation toward zero. This preserves the full coordinate range without a wide
+sum. The [core tests](tests/test_absolute_to_relative_core.c) compare signed
+averages and extreme differences with an independent wide reference and retain
+independent-listener history checks.

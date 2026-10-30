@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "host": [
+    "bash",
+    "tests/run-docker.sh"
+  ],
+  "contracts": [
+    {
+      "fixture": "tests/test_absolute_to_relative_core.c",
+      "asserts": "Signed deltas, rounding and arithmetic boundaries"
+    },
+    {
+      "fixture": "tests/runtime/driver_harness.c",
+      "asserts": "Whole unchanged production driver/structs/API: independent axes/sources, real injected generation changes, transparent source edges, stale payload cancellation, reset/init and original sync"
+    },
+    {
+      "fixture": "tests/native/module/main.c",
+      "asserts": "Actual driver API plus real ZMK layer event dispatch; ordered per-source/axis samples and transparent buttons, 3 repeats per supported core"
+    }
+  ],
+  "limits": "Conversion boundary/compile evidence only; button/frame/settings assertions moved to zmk-input-suppress; no physical acceptance.",
+  "execution": {
+    "default": "quick: every host behavioral fixture and scenario under ASan/UBSan once; offline-admission and coverage-validator units once",
+    "full": "Same host cases under sanitizers/optimization and complete arithmetic/driver line/branch coverage; supported-core ARM/native entries remain separate",
+    "integration": "owner native/DTS/API guards when interfaces or kernel contracts change; not a prerequisite for pure host behavior",
+    "transport": "actual ordered USB/BLE/split/power/reset evidence; archived simulation is not a passing substitute"
+  },
+  "infrastructure": {
+    "fixtures": [
+      {
+        "fixture": "tests/integration/test_offline.py",
+        "asserts": "Supported clean dependency pins, missing inputs, safe project/output/symlink layout and fresh outputs; reject unowned settings fixture selection"
+      },
+      {
+        "fixture": "tests/test_runtime_coverage.py",
+        "asserts": "Complete-driver entry rejects empty/unrelated/missing-function/unexecuted line/branch reports and invalid mode/retired selectors"
+      }
+    ],
+    "entry": "tests/integration/run.sh",
+    "preparation": "Explicit pinned offline workspace; local unchanged ZMK clone and original fixture manifest; no fetch or source repair",
+    "limits": "Admission tests control dependency responses. Actual native/API/firmware fixtures separately verify unchanged stock ZMK and DYA. Physical transport remains separate."
+  },
+  "integer_width": {
+    "production": "32-bit arithmetic; independent wider oracles remain test-only",
+    "contract": "Coordinate subtraction uses checked 32-bit saturation. The two-sample average splits each operand into quotient/remainder and applies one signed truncation, preserving the full int32 coordinate contract without a wide sum.",
+    "fixtures": "test_absolute_to_relative_core.c retains full-range saturation and independent histories; the signed-average grid compares every small positive/negative pair with an independent wide reference.",
+    "physical": "NOT RUN"
+  }
+}

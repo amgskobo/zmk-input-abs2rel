@@ -1,0 +1,2 @@
+config ZMK_ABS2REL_NATIVE_TEST
+    bool "Converter native contract fixture"
