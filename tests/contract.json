@@ -34,6 +34,10 @@
       {
         "fixture": "tests/test_runtime_coverage.py",
         "asserts": "Complete-driver entry rejects empty/unrelated/missing-function/unexecuted line/branch reports and invalid mode/retired selectors"
+      },
+      {
+        "fixture": "tests/integration/test_workspace_env.py",
+        "asserts": "Canonical host entry includes selected-workspace/cache-symlink/poisoned-environment tests; keep-ambient negative control must fail through that entry"
       }
     ],
     "entry": "tests/integration/run.sh",
