@@ -5,6 +5,12 @@
 #include <zmk/keymap.h>
 static const struct device *converter=DEVICE_DT_GET(DT_NODELABEL(zip_absolute_to_relative));
 static const struct device *legacy=DEVICE_DT_GET(DT_NODELABEL(zip_absolute_to_relative_scroll));
+#define LISTENER_INDEX(n, compat, label) \
+ + (DT_SAME_NODE(DT_INST(n, compat), DT_NODELABEL(label)) ? n : 0)
+enum {
+ source_a_index = 0 DT_COMPAT_FOREACH_STATUS_OKAY_VARGS(zmk_input_listener, LISTENER_INDEX, listener_a),
+ source_b_index = 0 DT_COMPAT_FOREACH_STATUS_OKAY_VARGS(zmk_input_listener, LISTENER_INDEX, listener_b),
+};
 static unsigned order;
 static void sample(unsigned source,uint8_t type,uint16_t code,int32_t value,bool sync,
                    uint8_t expected_type,uint16_t expected_code,int32_t expected_value) {
@@ -48,6 +54,18 @@ static void run(void *a,void *b,void *c) {
  axis(0,INPUT_ABS_X,780,false,-10);
  sample(255,INPUT_EV_ABS,INPUT_ABS_X,123,true,INPUT_EV_ABS,INPUT_ABS_X,123);
  sample(0,INPUT_EV_REL,INPUT_REL_Y,-7,true,INPUT_EV_REL,INPUT_REL_Y,-7);
+ /* Preserve the original direct 0/1 cases above and also exercise the actual
+  * globally numbered callback sources, including the sparse 3/4 topology. */
+ __ASSERT_NO_MSG(source_a_index != source_b_index);
+ __ASSERT_NO_MSG(zmk_keymap_layer_deactivate(1,false)>=0);
+ axis(source_a_index,INPUT_ABS_X,1000,true,0);
+ axis(source_b_index,INPUT_ABS_X,2000,true,0);
+ axis(source_a_index,INPUT_ABS_X,1010,false,5);
+ axis(source_b_index,INPUT_ABS_X,1980,false,-10);
+ sample(source_a_index,INPUT_EV_KEY,INPUT_BTN_TOUCH,0,true,INPUT_EV_KEY,INPUT_BTN_TOUCH,0);
+ axis(source_a_index,INPUT_ABS_X,3000,true,0);
+ axis(source_b_index,INPUT_ABS_X,1960,false,-20);
+ printk("abs2rel callback indices: %u/%u\n",source_a_index,source_b_index);
  printk("abs2rel native contract: PASS\n"); exit(0);
 }
 K_THREAD_DEFINE(abs2rel_native_test,4096,run,NULL,NULL,NULL,K_LOWEST_APPLICATION_THREAD_PRIO,0,100);

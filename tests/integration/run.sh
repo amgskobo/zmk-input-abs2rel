@@ -39,9 +39,9 @@ fi
 source /src/tests/integration/workspace-env.sh
 zmk_test_select_workspace "$workspace"
 
-west build -s "$workspace/zmk/app" -d "$work_dir/build" -b xiao_ble/nrf52840/zmk -- \
+west build -o=-j1 -s "$workspace/zmk/app" -d "$work_dir/build" -b xiao_ble/nrf52840/zmk -- \
     -DZMK_EXTRA_MODULES="/src;/src/tests/integration/firmware" \
-    -DSHIELD=abs2rel_test
+    -DSHIELD=abs2rel_test -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
 test -f "$work_dir/build/zephyr/zmk.uf2"
 grep -q '^CONFIG_ZMK_INPUT_PROCESSOR_ABSOLUTE_TO_RELATIVE=y' \

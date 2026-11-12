@@ -1,0 +1,2 @@
+config ZMK_ABS2REL_SOURCE_LIMIT_TEST
+    bool "Converter source bound fixture"

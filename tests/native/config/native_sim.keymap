@@ -10,8 +10,8 @@
     };
     source_a: source_a { compatible = "zmk,input-mock"; event-period = <100>; events = <>; };
     source_b: source_b { compatible = "zmk,input-mock"; event-period = <100>; events = <>; };
-    listener_a { compatible = "zmk,input-listener"; device = <&source_a>; input-processors = <&zip_absolute_to_relative>; };
-    listener_b { compatible = "zmk,input-listener"; device = <&source_b>; input-processors = <&zip_absolute_to_relative>; };
+    listener_a: listener_a { compatible = "zmk,input-listener"; device = <&source_a>; input-processors = <&zip_absolute_to_relative>; };
+    listener_b: listener_b { compatible = "zmk,input-listener"; device = <&source_b>; input-processors = <&zip_absolute_to_relative>; };
 };
 &kscan { events = <ZMK_MOCK_PRESS(0,0,30000)>; };
 /* Only this compatibility fixture opts into separate legacy history. */

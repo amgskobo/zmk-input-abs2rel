@@ -1,0 +1,12 @@
+/* SPDX-License-Identifier: MIT */
+#include "low.overlay"
+/ {
+    excluded_listener {
+        compatible = "zmk,input-listener";
+        device = <&source_a>;
+        /* The selected core includes this child despite its disabled status. */
+        child { status = "disabled"; layers = <1>;
+            input-processors = <&zip_absolute_to_relative>;
+        };
+    };
+};

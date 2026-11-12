@@ -1,0 +1,4 @@
+/* SPDX-License-Identifier: MIT */
+#include "low.overlay"
+&listener_a { status = "disabled"; };
+&listener_b { status = "disabled"; };

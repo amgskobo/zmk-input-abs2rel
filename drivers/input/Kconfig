@@ -5,3 +5,19 @@ config ZMK_INPUT_PROCESSOR_ABSOLUTE_TO_RELATIVE
     default $(dt_compat_enabled,$(DT_COMPAT_ZMK_INPUT_PROCESSOR_ABSOLUTE_TO_RELATIVE))
     depends on ZMK_POINTING
     depends on !ZMK_SPLIT || ZMK_SPLIT_ROLE_CENTRAL
+
+config ZMK_INPUT_ABS2REL_MAX_SOURCES
+    int "Reserved abs2rel source indices (0 for all listeners)"
+    depends on ZMK_INPUT_PROCESSOR_ABSOLUTE_TO_RELATIVE
+    range 0 256
+    default 0
+    help
+      Zero preserves independent histories for every enabled ZMK input listener,
+      with at least source zero for callers without a processor state. A positive
+      value reserves the original global indices zero through this value minus
+      one for every converter node. Indices are not remapped: sparse references
+      require their full range. Enabled listeners whose devices are enabled have
+      their base and all child routes checked at build time. Direct callers must
+      also fit the selected bound; out-of-range events pass through unchanged.
+      Verify effective DTS indices and direct callers before selecting a smaller
+      board-specific bound. The default preserves generic source capacity.

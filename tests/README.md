@@ -12,6 +12,12 @@ ZMK_TEST_MODE=full bash tests/run-docker.sh
 ZMK_TEST_OUTPUT=/fresh/native bash tests/run-native.sh /resolved/workspace
 ZMK_TEST_OFFLINE_WORKSPACE=/resolved/workspace ZMK_TEST_OUTPUT=/fresh/integration \
   bash /src/tests/integration/run.sh upstream # or dya
+# In each selected supported workspace, after its offline admission:
+python3 /src/tests/source-limits/run.py /resolved/workspace /fresh/source-limits
+# Match two ARM builds differing only in MAX_SOURCES=0 versus2, using the
+# original unmodified owner snapshot as the baseline source:
+python3 /src/tests/source-limits/measure_arm.py /arm/automatic /arm/limited \
+  /original-owner /fresh/arm-measurement
 ```
 
 | Boundary | Fixture and assertions |
@@ -19,6 +25,8 @@ ZMK_TEST_OFFLINE_WORKSPACE=/resolved/workspace ZMK_TEST_OUTPUT=/fresh/integratio
 | Arithmetic | test_absolute_to_relative_core.c: first reference, reset, symmetric rounding, saturation across full int32 range and independent axes |
 | Complete production driver | runtime/driver_harness.c includes the unchanged driver file: actual structs, API and DT instance; independent sources/axes, source-local touch reset, layer/reset generations, transparent source events, unknown/invalid input, cold init and sync |
 | Real core events | native/module/main.c: actual driver API with real ZMK layer dispatch, source/axis independence, ordered samples and transparent button values; same binary3 times on stock/DYA |
+| Source capacity | runtime/source_limits_harness.c: all256 uint8 indices in automatic2/5, explicit1/2/256 and no-listener fallback profiles; independent retained coordinates, NULL, invalid pass-through and layer reset |
+| Real source graph | source-limits/run.py: original sparse auto graph plus low auto/limited/wide/fallback and disabled-device/listener profiles; required base/disabled-child/sparse/Kconfig rejections; same native binary3 times per accepted profile |
 | Standard nodes/storage | check_converter.py: standard include has one active instance; explicit native legacy opt-in has independent histories; allocated state count/bytes come from the actual linker map |
 | Build registration | integration/run.sh: stock/DYA ARM builds, enabled converter and absent legacy policy registration, then native fixture |
 | Test admission | test_runtime_coverage.py: actual full entry rejects empty/unrelated/partial reports, unexecuted functions/lines/branches and invalid mode/old selectors |
@@ -86,3 +94,37 @@ uses the same selection helper. This validates dependency selection, not hardwar
 Coordinate subtraction uses checked 32-bit saturation. The two-sample average splits each operand into quotient/remainder and applies one signed truncation, preserving the full int32 coordinate contract without a wide sum.
 
 test_absolute_to_relative_core.c retains full-range saturation and independent histories; the signed-average grid compares every small positive/negative pair with an independent wide reference.
+
+
+## Optional source-index allocation
+
+`CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES=0` preserves automatic allocation for all
+listeners, minimum one. Positive 1..256 reserves the original index prefix;
+there is no remapping. Re-audit every actual callback and direct API caller.
+The canonical source matrix fixes its original sparse automatic profile and its
+new low automatic/limited profiles itself, so ambient `MAX_SOURCES` or
+`LOW_SOURCES` values cannot silently replace the high-index coverage.
+Seven configured native product profiles each run the same binary three times;
+five negative profiles require their exact guard/Kconfig diagnostic. The final
+profile additionally enables strict ASan and UBSan. Any upstream sanitizer failure
+is reported BLOCKED with its original trace; it is not a product PASS.
+`--control CASE` is an explicit focused control, not the complete matrix.
+The whole-driver host entry retains every original assertion and adds six
+capacity profiles, each checking all 256 possible uint8 source indices under
+sanitizers (plus optimization and coverage in full mode).
+
+The original native fixture keeps its direct-source 0/1 assertions and adds
+ordered samples for its actual compiled callback indices (3/4 in the original
+graph). Low overlays disable the unrelated mouse-key listeners and exercise
+0/1 without changing the canonical sparse profile. Base, disabled child and
+sparse references above the bound must fail; disabled listener/device cases
+must build. `source-limits/apply_fault.py` creates named base/child/device guard
+faults only in a distinct disposable owner copy. Required rejections must fail
+when their guard is removed; compilation success never counts as a killed fault.
+
+`source-limits/measure_arm.py` replays the real ARM compiler command for the
+original baseline, current automatic and current limited source. It retains
+objects, commands, disassembly, state symbols, function text hashes and compiler
+stack frames, and requires identical default code/state/frames and an 84-byte
+five-to-two saving without a frame increase. The native and offline build
+entries use one compiler job. All evidence paths must be fresh.

@@ -90,7 +90,7 @@ def prepare(source, variant, manifest, output):
     output.mkdir(parents=True, exist_ok=False)
     workspace = output / "workspace"
     (workspace / ".west").mkdir(parents=True)
-    (workspace / ".west/config").write_text("[manifest]\npath = config\nfile = west.yml\n[build]\nbuild-opt = -j2\n")
+    (workspace / ".west/config").write_text("[manifest]\npath = config\nfile = west.yml\n[build]\nbuild-opt = -j1\n")
     (workspace / "config").mkdir()
     shutil.copyfile(manifest, workspace / "config/west.yml")
     for name, (relative, path) in projects.items():

@@ -7,7 +7,20 @@ typedef int atomic_t;
 typedef int atomic_val_t;
 #define MAX(a,b) ((a)>(b)?(a):(b))
 #define ARG_UNUSED(x) ((void)(x))
-#define DT_NUM_INST_STATUS_OKAY(c) 2
+#ifndef CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES
+#define CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES 0
+#endif
+#define ABS2REL_UNPAREN(...) __VA_ARGS__
+#if CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES == 0
+#define COND_CODE_0(value, if_zero, otherwise) ABS2REL_UNPAREN if_zero
+#else
+#define COND_CODE_0(value, if_zero, otherwise) ABS2REL_UNPAREN otherwise
+#endif
+#define DT_COMPAT_FOREACH_STATUS_OKAY_VARGS(...)
+#ifndef ABS2REL_TEST_LISTENERS
+#define ABS2REL_TEST_LISTENERS 2
+#endif
+#define DT_NUM_INST_STATUS_OKAY(c) ABS2REL_TEST_LISTENERS
 #define DT_INST_FOREACH_STATUS_OKAY(fn) fn(0)
 #define DEVICE_DT_INST_GET(n) (&device)
 #define DEVICE_DT_INST_DEFINE(n,init,pm,storage,config,level,priority,driver) \
@@ -26,7 +39,7 @@ typedef int atomic_val_t;
 #define ZMK_INPUT_PROC_CONTINUE 0
 #define ZMK_EV_EVENT_BUBBLE 0
 struct device { void *data; const void *api; };
-struct zmk_input_processor_state { unsigned input_device_index; };
+struct zmk_input_processor_state { uint8_t input_device_index; };
 struct input_event { uint8_t type; uint16_t code; int32_t value; bool sync; };
 struct zmk_input_processor_driver_api {
  int (*handle_event)(const struct device *,struct input_event *,uint32_t,uint32_t,

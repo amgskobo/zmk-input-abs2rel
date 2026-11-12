@@ -11,7 +11,30 @@
 #include <zmk/event_manager.h>
 #include <zmk/events/layer_state_changed.h>
 #include <zmk-input-abs2rel/absolute_to_relative_core.h>
-#define ABSOLUTE_TO_RELATIVE_STREAM_COUNT MAX(DT_NUM_INST_STATUS_OKAY(zmk_input_listener), 1)
+#define ABSOLUTE_TO_RELATIVE_STREAM_COUNT                                                    \
+    COND_CODE_0(CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES,                                          \
+                (MAX(DT_NUM_INST_STATUS_OKAY(zmk_input_listener), 1)),                         \
+                (CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES))
+
+/* The core uses global DT_INST listener indices, not a compact list of the
+ * listeners that reference this converter. It registers enabled listeners only
+ * when their device is enabled, and includes every child, even disabled ones.
+ * Direct API callers must also fit the selected bound. */
+#define ABS2REL_CHECK_PROCESSOR(node, prop, index, source)                                    \
+    COND_CODE_1(DT_NODE_HAS_COMPAT(DT_PHANDLE_BY_IDX(node, prop, index),                        \
+                                   zmk_input_processor_absolute_to_relative),                \
+                (BUILD_ASSERT((source) < ABSOLUTE_TO_RELATIVE_STREAM_COUNT,                   \
+                              "Abs2rel source limit excludes a referenced listener index");), ())
+#define ABS2REL_CHECK_ROUTE(node, source)                                                    \
+    COND_CODE_1(DT_NODE_HAS_PROP(node, input_processors),                                      \
+                (DT_FOREACH_PROP_ELEM_VARGS(node, input_processors,                          \
+                                             ABS2REL_CHECK_PROCESSOR, source)), ())
+#define ABS2REL_CHECK_LISTENER(source, compat, unused)                                        \
+    COND_CODE_1(DT_NODE_HAS_STATUS(DT_PHANDLE(DT_INST(source, compat), device), okay),          \
+                (ABS2REL_CHECK_ROUTE(DT_INST(source, compat), source)                         \
+                 DT_FOREACH_CHILD_VARGS(DT_INST(source, compat), ABS2REL_CHECK_ROUTE, source)), ())
+DT_COMPAT_FOREACH_STATUS_OKAY_VARGS(zmk_input_listener, ABS2REL_CHECK_LISTENER, unused)
+
 struct absolute_to_relative_stream {
     struct absolute_to_relative_axis_state x, y;
     atomic_val_t applied_generation;
@@ -33,7 +56,9 @@ static inline struct absolute_to_relative_stream *
 stream_for_event(struct absolute_to_relative_data *data,
                  const struct zmk_input_processor_state *state) {
     if (state == NULL) { return &data->streams[0]; }
+#if CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES != 256
     if (state->input_device_index >= ABSOLUTE_TO_RELATIVE_STREAM_COUNT) { return NULL; }
+#endif
     return &data->streams[state->input_device_index];
 }
 /* A reference-only sample has no relative payload. Keep its original frame

@@ -1,0 +1,2 @@
+/* SPDX-License-Identifier: MIT */
+#include "../../native/config/native_sim.keymap"

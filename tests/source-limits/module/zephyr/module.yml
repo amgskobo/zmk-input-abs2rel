@@ -1,0 +1,4 @@
+name: abs2rel-source-limit-contract
+build:
+  cmake: .
+  kconfig: Kconfig

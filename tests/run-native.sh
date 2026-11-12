@@ -11,7 +11,7 @@ cd "$workspace"
 source "$root/tests/integration/workspace-env.sh"
 zmk_test_select_workspace "$workspace"
 west zephyr-export
-west build -p=always -o=-j2 -s "$workspace/zmk/app" -d "$out" -b native_sim//zmk_test_mock -- \
+west build -p=always -o=-j1 -s "$workspace/zmk/app" -d "$out" -b native_sim//zmk_test_mock -- \
  -DZMK_CONFIG="$root/tests/native/config" -DZMK_EXTRA_MODULES="$root;$root/tests/native/module" >"$out.build.log" 2>&1
 for repeat in 1 2 3; do
  timeout 30 "$out/zephyr/zmk.exe" >"$out.run-$repeat.log" 2>&1

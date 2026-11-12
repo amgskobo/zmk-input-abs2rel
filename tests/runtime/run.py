@@ -40,6 +40,17 @@ def main():
                 '-I'+str(root/'tests/support'),'-I'+str(root/'include'),
                 str(root/'tests/runtime/driver_harness.c'),'-o',str(binary)],check=True)
             subprocess.run([str(binary)],check=True)
+        # The complete original driver still covers every branch. These extra
+        # builds check automatic/sparse/fallback and explicit uint8_t bounds.
+        for listeners,bound in ((2,0),(5,0),(5,2),(0,0),(5,1),(5,256)):
+            for label,flags in variants:
+                binary=work/f'sources-{listeners}-{bound}-{label}'
+                subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror',*flags,
+                    f'-DABS2REL_TEST_LISTENERS={listeners}',
+                    f'-DCONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES={bound}',
+                    '-I'+str(root/'tests/support'),'-I'+str(root/'include'),
+                    str(root/'tests/runtime/source_limits_harness.c'),'-o',str(binary)],check=True)
+                subprocess.run([str(binary)],check=True)
         if mode=='full':
             subprocess.run(['gcov','-b','-c',str(work/'coverage-driver_harness.gcno')],cwd=work,check=True,capture_output=True)
             for path in (source,):

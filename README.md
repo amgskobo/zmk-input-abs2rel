@@ -38,6 +38,24 @@ neutral MSC_SCAN marker preserving sync so the final stage can close pending
 motion. A stale coordinate generation is neutralized; original button edges
 remain available to the final owner, including release during a reset.
 
+`CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES=0` is the default and retains a history
+for every enabled input listener, with at least index 0 for a NULL processor
+state. A positive value from 1 through 256 explicitly reserves the original
+global listener indices 0 through N-1 in every converter node. Indices are not
+remapped: references at 3 and 4 require at least 5 slots even if only two listeners
+use the converter. Enabled listeners whose devices are enabled have their base
+and every child route checked at compile time, including disabled children that
+the supported core still enumerates. A reference outside the bound fails with
+`Abs2rel source limit excludes a referenced listener index`.
+
+Direct API callers must obey the same index bound; NULL still uses index 0 and
+out-of-range events still pass through unchanged. Re-audit compiled listener
+numbering, base/child routes and direct callers before choosing a smaller
+board-specific value. On Cortex-M each reserved history costs 28 bytes per
+converter node, plus one shared 4-byte generation counter per node; bounding five
+slots to two saves 84 bytes without changing either retained history. These are
+volatile references, so the option changes no settings keys and needs no erase.
+
 ## Migration from combined conversion/suppression
 
 Remove `suppress-btn-touch` and `suppress-btn0` from converter nodes.

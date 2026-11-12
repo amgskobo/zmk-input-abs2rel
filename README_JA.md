@@ -18,6 +18,22 @@
 
 初回基準や古い座標はsyncを保つ中立MSC_SCANになります。ボタン方針はconverterに持たせません。
 
+`CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES=0` が既定で、有効な全input listener分の
+履歴を保持します。processor stateがNULLの場合のindex0も最低1個確保します。
+1〜256の正の値Nを指定すると、各converter nodeに元のグローバルlistener index
+0〜N-1を確保します。番号は詰め直しません。converterを使うlistenerが2個だけでも、
+index3と4を参照するなら最低5枠必要です。有効なdeviceを持つ有効なlistenerの基本経路と
+全子経路をコンパイル時に検査します。対応coreは無効な子経路も列挙するため、それも
+対象です。範囲外の参照は `Abs2rel source limit excludes a referenced listener index`
+という診断でビルドを拒否します。
+
+直接APIを呼ぶ側も同じindex上限を守ります。NULLは引き続きindex0を使い、範囲外の
+イベントは従来どおり変更せず通します。board固有の小さい値を選ぶ前に、コンパイル済みの
+listener番号、基本・子経路、直接呼び出しを再確認してください。Cortex-Mでは各履歴が
+converter nodeごとに28バイト、共有generation counterがnodeごとに4バイトです。
+5枠から2枠にすると、保持する2つの履歴を変えずに84バイト削減します。揮発性の基準座標
+だけが対象で、設定キーの変更や消去は不要です。
+
 旧 `suppress-btn-touch` / `suppress-btn0` と抑止 API は削除しました。
 旧 `CONFIG_ZMK_INPUT_ABS2REL_CUSTOM_SETTINGS` も削除します。
 共通抑止器にプロファイル表・レイヤー監視・旧設定名の互換処理はありません。

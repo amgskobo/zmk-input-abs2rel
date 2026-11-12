@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: MIT */
+#include "low.overlay"
+/ {
+    excluded_listener {
+        compatible = "zmk,input-listener";
+        device = <&source_a>;
+        input-processors = <&zip_absolute_to_relative>;
+    };
+};

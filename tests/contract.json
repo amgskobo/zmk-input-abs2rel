@@ -49,5 +49,13 @@
     "contract": "Coordinate subtraction uses checked 32-bit saturation. The two-sample average splits each operand into quotient/remainder and applies one signed truncation, preserving the full int32 coordinate contract without a wide sum.",
     "fixtures": "test_absolute_to_relative_core.c retains full-range saturation and independent histories; the signed-average grid compares every small positive/negative pair with an independent wide reference.",
     "physical": "NOT RUN"
+  },
+  "source_capacity": {
+    "default": "CONFIG_ZMK_INPUT_ABS2REL_MAX_SOURCES=0 preserves every enabled listener index, minimum one NULL fallback. Positive 1..256 is an explicit prefix of original global uint8 indices; no remapping.",
+    "guard": "Enabled listeners with enabled devices: base and every child route, including disabled children. A referenced index outside the bound is a named build rejection. Direct callers must fit the same bound.",
+    "runtime": "All 256 lookup IDs under six host profiles, every retained coordinate independent, NULL/invalid behavior and generation resets; all original whole-driver scenarios remain.",
+    "native": "Fixed original sparse auto and low auto/limited/wide/fallback/disabled-device/disabled-listener profiles, five named build rejections, strict ASan+UBSan auto. Canonical dispatch ignores ambient profile variables. Explicit --control is focused and never a complete-matrix PASS.",
+    "measurement": "Matched baseline/default/limited Cortex-M objects on both supported cores, actual state/function code bytes/compiler frames. Default automatic code and state remain identical. Each source costs 28 bytes per node; five-to-two saves 84 bytes per node.",
+    "physical": "NOT RUN; installed-image HID/BLE/split, timing, power and stack high-water remain separate."
   }
 }
